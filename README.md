@@ -6,8 +6,8 @@
 This is a public repository containing scripts used in the publication:
 
 Frede A\*, Czarnewski P\*, Monasterio G\* et al. (\* co-first authors)\
-**B cell expansion hinders the stomal-epithelium regenerative crosstalk during mucosal healing**\
-[Immunity 2022 (in Revision)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3945928)
+[B cell expansion hinders the stomal-epithelium regenerative crosstalk during mucosal healing]((https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3945928))\
+**Immunity** 2022 (in Revision)
 
 
 
