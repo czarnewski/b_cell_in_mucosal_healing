@@ -1,4 +1,12 @@
+
+# Folders to ignore
+**/data
+**/results
+**/analysis
+**/log
+
 # History files
+.DStore
 .Rhistory
 .Rapp.history
 

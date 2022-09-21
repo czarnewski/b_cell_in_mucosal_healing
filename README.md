@@ -1,17 +1,45 @@
-# B_cell_in_mucosal_healing
+# B cell in mucosal healing
+
 ***
+### Citation
 
 This is a public repository containing scripts used in the publication:
 
 Frede A\*, Czarnewski P\*, Monasterio G\* et al. (\* co-first authors)\
-**B cell expansion hinders the stroma-epitheoium regenerative crosstalk during mucosal healing**\
+**B cell expansion hinders the stomal-epithelium regenerative crosstalk during mucosal healing**\
 [Immunity 2022 (in Revision)](https://papers.ssrn.com/sol3/papers.cfm?abstract_id=3945928)
 
-The analysis scripts are available in the `code` folder  and is empty by default. The data folder is used
- to host the raw counts and other files used for the analysis. Some datasets require
- manual download and should be placed in the corresponding folder. The `results` folder,
- also empty by default, will store the output from analysis performed herein.
- The list of all datasets used in the manuscript are depicted below:
+
+
+***
+### Running the analysis
+
+The analysis scripts are available in the `code` folder  and is empty by default.
+The `data` folder is used to host the raw counts and other files used for the analysis.
+Some datasets require manual download and should be placed in the corresponding folder. The `results` folder,
+also empty by default, will store the output from analysis performed.
+The analysis done herein can be reproduced by installing CONDA and running:
+
+1. Clone this repository\
+```
+git clone https://github.com/czarnewski/b_cell_in_mucosal_healing.git
+```
+
+2. Create and activate the conda environment\
+```
+cd b_cell_in_mucosal_healing
+
+conda activate base
+conda install -c conda-forge mamba
+
+mamba env create -n b_cell_mh -f env_b_cell_mh.yml
+conda activate b_cell_mh
+```
+
+***
+### Datasets
+
+The list of all datasets used in the manuscript are depicted below:
 
 | Technology | Dataset | source publication | Accession no |
 |------------|---------|--------------------|--------------|

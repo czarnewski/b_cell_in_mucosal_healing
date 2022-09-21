@@ -1,0 +1,216 @@
+---
+title: "Analysis of single cell datasets"
+output: html_document
+---
+
+
+# Loading libraries
+
+```{r}
+library(Seurat)
+library(uwot)
+library(Matrix)
+library(rafalib)
+library(dplyr)
+remotes::install_github("czarnewski/niceRplots")
+library(niceRplots)
+library(harmony)
+library(biomaRt)
+```
+
+
+# B cell scRNAseq (DSSd0 vs DSSd4)
+
+```{r}
+
+```
+
+
+# Epithelial scRNAseq (DSSd14 | ctrl vs BCD)
+
+```{r}
+
+```
+
+
+# Stromal scRNAseq (DSSd14 | ctrl vs BCD)
+
+```{r}
+
+```
+
+
+
+# Bone marrow from Tabula Muris (GSE109774, healthy)
+
+## Downloading datasets from GEO
+
+```{r}
+# CREATE FOLDER STRUCTURE
+PATH <- "../data/tabula_muris_GSE109774/"
+url <- "https://www.ncbi.nlm.nih.gov/geo/download/?acc="
+dir.create(PATH, recursive = T)
+
+
+# DOWNLOAD THE TWO BONE MARROW SAMPLES
+download.file(
+  url = paste0(url,"GSM3040900&format=file&file=GSM3040900%5FMarrow%2D10X%5FP7%5F2%2Etar%2Egz"),
+  destfile = paste0("../data/tabula_muris_GSE109774/GSM3040900.tar.gz"))
+download.file(
+  url = paste0(url,"GSM3040901&format=file&file=GSM3040901%5FMarrow%2D10X%5FP7%5F3%2Etar%2Egz"),
+  destfile = paste0("../data/tabula_muris_GSE109774/GSM3040901.tar.gz"))
+
+
+# DECOMPRESS FILES 
+untar(tarfile = "../data/tabula_muris_GSE109774/GSM3040900.tar.gz",
+      exdir = "../data/tabula_muris_GSE109774/")
+untar(tarfile = "../data/tabula_muris_GSE109774/GSM3040901.tar.gz",
+      exdir = "../data/tabula_muris_GSE109774/")
+
+
+# CLEAN THE DIRECTORY
+file.remove(c("../data/tabula_muris_GSE109774/GSM3040900.tar.gz",
+              "../data/tabula_muris_GSE109774/GSM3040901.tar.gz") )
+```
+
+
+## Basic analysis using Seurat
+
+```{r}
+# CREATE SEURAT OBJECT FOR EACH DATASET
+dir_list <- list.dirs( PATH , full.names = F)[-1]
+rawdata <- lapply( dir_list , function(x) { 
+  CreateSeuratObject(counts = Read10X(paste0(PATH,x)) , project = x) } )
+names(rawdata) <- dir_list
+
+
+# MERGE OBJECTS INTO A SINGLE BONE_MARROW
+rawdata[["bone_marrow"]] <- merge(
+  x = rawdata[["Marrow-10X_P7_2"]],
+  y = rawdata["Marrow-10X_P7_3"])
+rawdata <- rawdata[-c(1:2)]
+
+
+# PERFORM STANDARD ANALYSIS USING SEURAT
+# Key function parameters used are shown (defaults were used otherwise)
+rawdata[["bone_marrow"]] <- NormalizeData( rawdata[["bone_marrow"]] )
+rawdata[["bone_marrow"]] <- FindVariableFeatures( rawdata[["bone_marrow"]],nfeatures = 4000 )
+rawdata[["bone_marrow"]] <- ScaleData( rawdata[["bone_marrow"]] ,vars.to.regress = "nFeature_RNA")
+rawdata[["bone_marrow"]] <- RunPCA( rawdata[["bone_marrow"]] ,npcs = 100 )
+rawdata[["bone_marrow"]] <- RunUMAP( 
+  object = rawdata[["bone_marrow"]] ,dims = 1:50, reduction = "pca",
+  spread = .5,min.dist = 0.3, repulsion.strength = 0.4 )
+rawdata[["bone_marrow"]] <- FindNeighbors( rawdata[["bone_marrow"]], dims = 1:30, reduction = "pca" )
+rawdata[["bone_marrow"]] <- FindClusters( rawdata[["bone_marrow"]], resolution = 1 )
+plot_meta(rawdata[["bone_marrow"]],red="umap",feat = "seurat_clusters",cex = 0.5)
+plot_meta(rawdata[["bone_marrow"]],red="umap",feat = "orig.ident",cex = 0.5)
+rawdata[["bone_marrow"]]$cell_name <- paste0("BM_",rawdata[["bone_marrow"]]$seurat_clusters)
+
+
+# SAVE THE SEURAT OBJECT
+saveRDS(rawdata[["bone_marrow"]],"../results/bone_marrow.rds")
+```
+
+
+# Create a joint UMAP for all datasets
+
+## Merge all datasets into 1 SeuratObject
+
+```{r}
+# LOAD DATASETS
+rawdata <- list()
+rawdata[["bone_marrow"]] <- readRDS("../results/bone_marrow.rds")
+rawdata[["bcell"]] <- readRDS("../results/Bcell.combined.RDS")
+rawdata[["epi"]] <- readRDS("../results/epi.int.RDS")
+rawdata[["stromal"]] <- readRDS("../results/stromal.int.RDS")
+
+
+# FIX THE CELL NAMES FOR COHERENCE
+rawdata[["bcell"]]$cell_name <- rawdata[["bcell"]]$celltype.stim
+rawdata[["bcell"]]$cell_name <- paste0( "B_", rawdata[["bcell"]]$stim,"_",rawdata[["bcell"]]$celltype )
+rawdata[["stromal"]]$cell_name <- paste0( "S_",gsub("depletion","BCD",gsub("control","CTRL",(rawdata[["stromal"]]$old.ident))), "_", rawdata[["stromal"]]$integrated_snn_res.0.2  )
+rawdata[["epi"]]$cell_name <- paste0( "E_",gsub("depletion","BCD",gsub("control","CTRL",(rawdata[["epi"]]$old.ident))),"_",rawdata[["epi"]]$integrated_snn_res.0.3 )
+
+
+# MERGE OBJECTS
+data <- merge(x = rawdata[[1]],y=rawdata[-1])
+```
+
+
+## Define matrix rotation function
+
+In linear algebra, a rotation matrix is a transformation matrix that is used to perform a rotation in Euclidean space. For example, using the convention below, the matrix:
+
+$$\begin{bmatrix}cos\theta & -sin\theta\\ sin\theta & cos\theta \end{bmatrix}$$
+
+```{r}
+rotate <- function(mat,angle){
+  angle <- ((angle)/180)*pi
+  rot_mat <- matrix(c(cos(angle),sin(angle),-sin(angle),cos(angle)),nrow = 2,byrow = T)
+  return(mat %*% rot_mat)
+}
+```
+
+
+## Compute the joint UMAP coordinates
+
+```{r}
+# Re-scale the individual umap embeddings [0-1]
+norm1 <- apply(rawdata[["bone_marrow"]]@reductions$umap@cell.embeddings,2,function(x) (x-min(x))/(max(x)-min(x)) )
+norm2 <- apply(rawdata[["bcell"]]@reductions$umap@cell.embeddings,2,function(x) (x-min(x))/(max(x)-min(x)) )
+norm4 <- apply(rawdata[["epi"]]@reductions$UMAP_on_integrated@cell.embeddings,2,function(x) (x-min(x))/(max(x)-min(x)) )
+norm5 <- apply(rawdata[["stromal"]]@reductions$UMAP_on_integrated@cell.embeddings,2,function(x) (x-min(x))/(max(x)-min(x)) )
+
+# Rotate the unit vector in a circle
+unit_vector <- c(0,1)
+res1 <- rotate(unit_vector,45+90*0)
+res2 <- rotate(unit_vector,45+90*1)
+res4 <- rotate(unit_vector,45+90*2)
+res5 <- rotate(unit_vector,45+90*3)
+
+# Compute the new coordinated for each dataset
+norm1t <- norm1 + matrix(rep(res1,nrow(norm1)),ncol = 2,byrow = T)
+norm2t <- norm2 + matrix(rep(res2,nrow(norm2)),ncol = 2,byrow = T)
+norm4t <- norm4 + matrix(rep(res4,nrow(norm4)),ncol = 2,byrow = T)
+norm5t <- norm5 + matrix(rep(res5,nrow(norm5)),ncol = 2,byrow = T)
+
+# Create new UMAP layout
+joint_umap <- rbind(norm1t,norm2t,norm4t,norm5t)
+```
+
+## Inspect joint UMAP using convex-hulls
+
+This is to make sure there are no cells in displayed in the wrong UMAP area.
+
+```{r}
+plot(joint_umap,cex=.3,type="n")
+ch <- chull(norm3)
+polygon( norm3[c(ch,ch[1]),1] , norm3[c(ch,ch[1]),2] , col = "grey90", border = "grey80")
+ch <- chull(norm1t)
+polygon( norm1t[c(ch,ch[1]),1] , norm1t[c(ch,ch[1]),2] , col = "grey90", border = "grey80")
+ch <- chull(norm2t)
+polygon( norm2t[c(ch,ch[1]),1] , norm2t[c(ch,ch[1]),2] , col = "grey90", border = "grey80")
+ch <- chull(norm4t)
+polygon( norm4t[c(ch,ch[1]),1] , norm4t[c(ch,ch[1]),2] , col = "grey90", border = "grey80")
+ch <- chull(norm5t)
+polygon( norm5t[c(ch,ch[1]),1] , norm5t[c(ch,ch[1]),2] , col = "grey90", border = "grey80")
+points(joint_umap,cex=.1)
+```
+
+## Add joint UMAP to the SeuratObject and save
+
+```{r}
+# ADD JOINT UMAP AND PLOT PER CELL CLUSTER
+data@reductions[['joint_umap']] <- CreateDimReducObject(embeddings = joint_umap)
+plot_meta(data,"joint_umap","cell_name",cex=.5)
+
+
+# SAVE OBJECTS AND NORMALIZED MATRICES
+saveRDS(data,"complete_dataset_BM_20210817.rds")
+save_matrix_to_HDF5( data@assays$RNA@data , "complete_dataset_normdata_20210817.rds" )
+```
+
+
+
+
+
