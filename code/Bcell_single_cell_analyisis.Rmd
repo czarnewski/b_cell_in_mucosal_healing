@@ -1,0 +1,1347 @@
+---
+title: "Seurat - Analysis of day 0 and day 14 B cell data"
+editor_options:
+  chunk_output_type: console
+date: 'Compiled: `r format(Sys.Date(), "%B %d, %Y")`'
+output:
+  html_document:
+    theme: united
+  pdf_document: default
+---
+***
+
+
+```{r init, cache=FALSE, message=FALSE}
+library(Seurat)
+library(dplyr)
+library(venn)
+library(cowplot)
+
+```
+```{r loading_data, cache=TRUE, message=FALSE}
+# Load the lung macrophage  dataset
+
+M3.data <- Read10X(data.dir = "/Users/kumtri/Documents/bcell_new_ref/new_refernce_alignment/day0/filtered_feature_bc_matrix")
+
+M4.data <- Read10X(data.dir = "/Users/kumtri/Documents/bcell_new_ref/new_refernce_alignment/day14/filtered_feature_bc_matrix")
+
+
+```
+######quality-check of the B cells
+
+```{r seurat object}
+D0.data_seurat <- CreateSeuratObject(M3.data, project = "B0")
+D14.data_seurat <- CreateSeuratObject(M4.data, project = "B14")
+
+# Merge datasets into one single seurat object
+combined_data <- merge(D0.data_seurat, c(D14.data_seurat), add.cell.ids=c("D0","D14"))
+```
+```{r}
+as.data.frame(combined_data@assays$RNA@counts[1:10,1:2])
+head(combined_data@meta.data,10)
+```
+## calculate QC
+```{r}
+mito_genes <- rownames(combined_data)[grep("^mt-",rownames(combined_data))]
+ribo_genes <- rownames(combined_data)[grep("^Rp[sl]",rownames(combined_data))]
+combined_data <- PercentageFeatureSet(combined_data, "^mt-", col.name = "percent_mito")
+combined_data <- PercentageFeatureSet(combined_data, "^Rp[sl]", col.name = "percent_ribo")
+```
+
+##plot QC
+
+```{r}
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+VlnPlot(combined_data, group.by= "orig.ident", features = feats, pt.size = 0.5,ncol = 4) + NoLegend()
+```
+```{r}
+dim(combined_data)
+```
+
+
+```{r}
+cowplot::plot_grid(ncol = 2,
+  FeatureScatter(combined_data, "nCount_RNA"  , "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_mito", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_ribo", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_ribo", "percent_mito", group.by = "orig.ident", pt.size = .5)
+)
+
+```
+
+```{r}
+library("biomaRt")
+listMarts()
+```
+
+
+#Filter out  "long non-coding RNA" from the expression matrix
+```{r, echo=TRUE, include=T, results='hold', fig.height = 1, fig.width = 3,tidy=T,fig.align='center',fig.show='hold'}
+
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+`%!in%` = Negate(`%in%`)
+
+annot <- getBM(c("ensembl_transcript_id","mgi_symbol","gene_biotype","transcript_biotype"), mart=mouse)
+gene_biotype <- sort(table(annot[annot[,"mgi_symbol"] %in% rownames(combined_data),"gene_biotype"])/dim(combined_data)[1]*100,decreasing = T)
+
+#select <- annot[(annot[,"gene_biotype"] %in% c("lncRNA")) & (annot[,"transcript_biotype"] %in% c("lincRNA","protein_coding")),]
+select <- annot[(annot[,"gene_biotype"] %!in% c("lncRNA")) & (annot[,"transcript_biotype"] %!in% c("lncRNA")),]
+combined_data_filt <- combined_data[select[select[,2] %in% rownames(combined_data),2],]
+gene_biotype_filtered <- sort(table(select[select[,"mgi_symbol"] %in% rownames(combined_data_filt),"gene_biotype"])/dim(combined_data_filt)[1]*100,decreasing = T)
+
+mypar(1,2)
+pie(gene_biotype, clockwise = T, labels = c("protein_coding"), col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype,0)) + 1) )[ round(gene_biotype,0) + 1 ])
+title("before filtering")
+pie(gene_biotype_filtered,clockwise = T,labels = c("protein_coding"),col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype_filtered,0)) + 1) )[ round(gene_biotype_filtered,0) + 1 ])
+title("after filtering")
+
+#annot2 <- getBM(c("ensembl_transcript_id", "mgi_symbol"), mart=mouse)
+#select2 <- annot2[annot2[,1] %in% rownames(RawData),]
+#RawData <- RawData[c(select2[,1]),]
+#RawData <- rowsum(RawData,select2[,2])
+
+#RawData <- RawData[rownames(RawData) != "",]
+```
+
+```{r}
+mypar(1,2)
+pie(gene_biotype, clockwise = T, labels = c("protein_coding"), col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype,0)) + 1) )[ round(gene_biotype,0) + 1 ])
+title("before filtering")
+pie(gene_biotype_filtered,clockwise = T,labels = c("protein_coding"),col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype_filtered,0)) + 1) )[ round(gene_biotype_filtered,0) + 1 ])
+title("after filtering")
+```
+
+dim(combined_data_filt)
+
+```{r}
+dim(combined_data_filt)
+```
+
+
+
+
+## Detection based filtering
+
+```{r}
+selected_c <- WhichCells(combined_data_filt, expression = nFeature_RNA > 200)
+selected_f <- rownames(combined_data_filt)[ Matrix::rowSums(combined_data_filt) >= 1]
+
+combined_data_filt_final <- subset(combined_data_filt, features=selected_f, cells=selected_c)
+dim(combined_data_filt_final)
+dim(combined_data_filt)
+dim(combined_data)
+```
+
+```{r}
+#Compute the relative expression of each gene per cell
+rel_expression <- t( t(combined_data_filt_final@assays$RNA@counts) / Matrix::colSums(combined_data_filt_final@assays$RNA@counts)) * 100
+most_expressed <- sort(Matrix::rowSums( rel_expression ),T)[20:1] / ncol(combined_data_filt_final)
+
+par(mfrow=c(1,2),mar=c(4,6,1,1))
+boxplot( as.matrix(t(rel_expression[names(most_expressed),])),cex=.1, las=1, xlab="% total count per cell",col=scales::hue_pal()(20)[20:1],horizontal=TRUE)
+```
+## Mitochondrial and ribosomal gene filtering
+
+```{r}
+selected_mito <- WhichCells(combined_data_filt_final, expression = percent_mito < 5)
+selected_ribo <- WhichCells(combined_data_filt_final, expression = percent_ribo > 5)
+
+combined_data_filt_final <- subset(combined_data_filt_final, cells = selected_mito)
+combined_data_filt_final <- subset(combined_data_filt_final, cells = selected_ribo)
+dim(combined_data_filt_final)
+
+```
+
+```{r}
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+cowplot::plot_grid(ncol = 1,
+VlnPlot(combined_data_filt_final, group.by= "orig.ident", features = feats, pt.size = 0.1,ncol = 4) + NoLegend())
+```
+## checking the quality after filtering
+
+```{r}
+cowplot::plot_grid(ncol = 2,
+  FeatureScatter(combined_data_filt_final, "nCount_RNA"  , "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_mito", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_ribo", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_ribo", "percent_mito", group.by = "orig.ident", pt.size = .5)
+)
+
+```
+
+```{r}
+convertHumanGeneList <- function(x){
+require("biomaRt")
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl")
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+genesV2 = getLDS(attributes = c("hgnc_symbol"), filters = "hgnc_symbol", values = x , mart = human, attributesL = c("mgi_symbol"), martL = mouse, uniqueRows=T)
+humanx <- unique(genesV2[, 2])
+# Print the first 6 genes found to the screen
+print(head(humanx))
+return(humanx)
+}
+```
+
+```{r}
+m.s.genes <- convertHumanGeneList(cc.genes.updated.2019$s.genes)
+m.g2m.genes <- convertHumanGeneList(cc.genes.updated.2019$g2m.genes)
+```
+
+```{r}
+combined_data_filt_final <- NormalizeData(combined_data_filt_final)
+```
+
+
+
+## cell cycle score
+
+```{r}
+#s.genes <- cc.genes$s.genes
+#g2m.genes <- cc.genes$g2m.genes
+combined_data_filt_final <- CellCycleScoring(object = combined_data_filt_final, g2m.features = m.g2m.genes,s.features = m.s.genes , set.ident = TRUE)
+#marrow <- CellCycleScoring(marrow, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+VlnPlot(combined_data_filt_final, features = c("S.Score","G2M.Score"), group.by= "orig.ident",ncol = 4, pt.size = .1)
+
+```
+
+```{r}
+RidgePlot(combined_data_filt_final, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+```
+
+```{r}
+Idents(combined_data_filt_final) <- "orig.ident"
+```
+
+### quality check endsnn
+
+### splitting the object
+
+```{r}
+DefaultAssay(combined_data_filt_final) <- "RNA"
+```
+
+```{r}
+combined_data_filt_final_list <- SplitObject(combined_data_filt_final, split.by = "orig.ident")
+```
+
+```{r}
+for (i in 1:length(combined_data_filt_final_list)) {
+    combined_data_filt_final_list[[i]] <- NormalizeData(combined_data_filt_final_list[[i]], verbose = FALSE)
+    combined_data_filt_final_list[[i]] <- FindVariableFeatures(combined_data_filt_final_list[[i]], selection.method = "vst", nfeatures = 2000,verbose = FALSE)
+}
+Day0 <- combined_data_filt_final_list[[1]]
+Day14 <- combined_data_filt_final_list[[2]]
+
+```
+
+## integrating day 0 and day 14 single cell data and further analysis
+
+
+```{r}
+Day0$stim <- "0d"
+Day14$stim <- "14d"
+```
+ finding anchors for the data
+```{r}
+Macro.anchors <- FindIntegrationAnchors(object.list = list(Day0,Day14), dims = 1:20)
+```
+
+```{r}
+Bcell.combined <- IntegrateData(anchorset = Macro.anchors, dims = 1:20)
+```
+
+
+Run a single integrated analysis
+
+```{r}
+DefaultAssay(Bcell.combined) <- "integrated"
+Bcell.combined <- ScaleData(Bcell.combined, verbose = FALSE)
+Bcell.combined <- RunPCA(Bcell.combined, npcs = 30, verbose = FALSE)
+
+Bcell.combined <- FindNeighbors(Bcell.combined, reduction = "pca", dims = 1:20)
+Bcell.combined <- FindClusters(Bcell.combined, resolution = 0.3)
+Bcell.combined <- RunTSNE(Bcell.combined, reduction = "pca", dims = 1:20)
+Bcell.combined <- RunUMAP(Bcell.combined, reduction = "pca", dims = 1:20)
+
+```
+
+
+```{r}
+DimHeatmap(object = Bcell.combined, reduction = "pca", cells = 500, dims =1:20, balanced = TRUE)
+```
+```{r}
+Bcell.combined <- JackStraw(Bcell.combined, num.replicate = 100)
+```
+
+```{r}
+Bcell.combined <- ScoreJackStraw(Bcell.combined, dims = 1:20)
+```
+
+
+```{r}
+JackStrawPlot(Bcell.combined, dims = 1:20)
+```
+
+```{r}
+ElbowPlot(Bcell.combined)
+```
+
+
+Plotting TSNE plots
+```{r}
+# Visualization
+p1 <- DimPlot(Bcell.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(Bcell.combined, reduction = "umap", label = TRUE)
+plot_grid(p1, p2)
+```
+
+
+```{r}
+DimPlot(Bcell.combined, reduction = "tsne", label = TRUE)
+```
+
+```{r}
+DimPlot(Bcell.combined, reduction = "umap", label = TRUE)
+```
+
+```{r}
+Bcell.combined.markers <- FindAllMarkers(Bcell.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+```{r}
+write.table(Bcell.combined.markers,"Bcell.combined.markers.tsv", sep = "\t")
+```
+
+
+```{r}
+show(Bcell.combined@meta.data)
+```
+
+
+```{r}
+table(Bcell.combined@active.ident)
+```
+
+```{r}
+table(Bcell.combined@meta.data$stim)
+```
+
+```{r}
+table(Bcell.combined@active.ident, Bcell.combined@meta.data$stim)
+```
+
+
+
+```{r}
+Bcell.combined@meta.data$celltype.stim <- paste0(Bcell.combined@active.ident, "_", 
+    Bcell.combined@meta.data$stim)
+Bcell.combined[["celltype"]] <- Idents(object = Bcell.combined)
+Idents(object = Bcell.combined) <- 'celltype.stim'
+```
+
+```{r}
+Bcell_D0_set <-subset(Bcell.combined,idents = c("0_0d","1_0d","2_0d","3_0d","4_0d","6_0d","7_0d","9_0d"),do.clean = T)
+```
+
+```{r}
+Bcell_D14_set <-subset(Bcell.combined,idents = c("0_14d","1_14d","2_14d","3_14d","4_14d","6_14d","7_14d","9_14d"),do.clean = T)
+```
+
+```{r}
+#D0.genes=colSums(GetAssayData(object = Bcell_D0_set, slot = "counts")>0)
+```
+
+
+
+# reanalyzing the data after removing the  contamination clusters 5 and 8
+#__________________________________________________________________________________________________--
+
+```{r}
+Bcell_D0_set <- NormalizeData(Bcell_D0_set)
+Bcell_D14_set <- NormalizeData(Bcell_D14_set)
+```
+
+```{r}
+Bcell_D0_set <- FindVariableFeatures(Bcell_D0_set, selection.method = "vst", nfeatures = 2000)
+Bcell_D14_set <- FindVariableFeatures(Bcell_D14_set, selection.method = "vst", nfeatures = 2000)
+```
+
+```{r}
+top_2000_day0 <- head(VariableFeatures(Bcell_D0_set), 2000)
+top_2000_day14 <- head(VariableFeatures(Bcell_D14_set), 2000)
+```
+```{r}
+genes.use <- unique(c(top_2000_day0, top_2000_day14))
+```
+
+
+```{r}
+genes_commoin.use <- intersect(c(top_2000_day0, top_2000_day14))
+```
+
+
+
+Scaling the Bcell_D0_set
+
+```{r}
+all.genes <- rownames(Bcell_D0_set)
+Bcell_D0_set <- ScaleData(Bcell_D0_set, features = all.genes)
+```
+
+Scaling the Bcell_D14_set
+
+
+```{r}
+all.genes <- rownames(Bcell_D14_set)
+Bcell_D14_set <- ScaleData(Bcell_D14_set, features = all.genes)
+```
+
+```{r}
+Bcell_D0_set$stim <- "D0"
+Bcell_D14_set$stim <- "D14"
+```
+
+
+#finding anchors for the data
+```{r}
+Bcell.anchors <- FindIntegrationAnchors(object.list = list(Bcell_D0_set,Bcell_D14_set), dims = 1:20)
+```
+
+```{r}
+Bcell.combined <- IntegrateData(anchorset = Bcell.anchors, dims = 1:20)
+```
+
+Run a single integrated analysis
+
+```{r}
+DefaultAssay(Bcell.combined) <- "integrated"
+Bcell.combined <- ScaleData(Bcell.combined, verbose = FALSE)
+Bcell.combined <- RunPCA(Bcell.combined, npcs = 30, verbose = FALSE)
+# t-SNE and Clustering
+Bcell.combined <- FindNeighbors(Bcell.combined, reduction = "pca", dims = 1:20)
+Bcell.combined <- FindClusters(Bcell.combined, resolution = 0.2)
+Bcell.combined <- RunTSNE(Bcell.combined, reduction = "pca", dims = 1:20)
+Bcell.combined <- RunUMAP(Bcell.combined, reduction = "pca", dims = 1:20)
+
+```
+
+```{r}
+DimHeatmap(object = Bcell.combined, reduction = "pca", cells = 500, dims =1:20, balanced = TRUE)
+```
+
+Plotting TSNE plots
+```{r}
+# Visualization
+p1 <- DimPlot(Bcell.combined, reduction = "umap", group.by = "stim")
+p2 <- DimPlot(Bcell.combined, reduction = "umap", group.by="celltype",label = TRUE)
+plot_grid(p1, p2)
+```
+
+```{r}
+DimPlot(Bcell.combined, reduction = "tsne", label = TRUE)
+```
+
+```{r}
+DimPlot(Bcell.combined, reduction = "umap", label = TRUE)
+```
+
+```{r}
+table(Bcell.combined@active.ident)
+```
+
+```{r}
+table(Bcell.combined@meta.data$stim)
+```
+
+```{r}
+table(Bcell.combined@active.ident, Bcell.combined@meta.data$stim)
+```
+
+```{r}
+Bcell.combined.markers <- FindAllMarkers(Bcell.combined, only.pos = TRUE, min.pct = 0.25, logfc.threshold = 0.25)
+```
+
+```{r}
+write.table(Bcell.combined.markers,"Bcell.combined.markers_after_filter.tsv", sep = "\t")
+```
+
+```{r}
+#Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+```
+
+```{r,useDingbats=FALSE}
+DefaultAssay(Bcell.combined) <- "integrated"
+top10 <- Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+DoHeatmap(Bcell.combined,cells = c(1000:3500), features = top10$gene,group.by = "celltype",label = TRUE, size = 3,  draw.lines = TRUE)
+```
+
+
+```{r,useDingbats=FALSE}
+DefaultAssay(Bcell.combined) <- "integrated"
+length(unique(Bcell.combined@active.ident))
+n.cells <- 300
+Bcell.combined_sub <- SubsetData(Bcell.combined,idents = c("0","1","2","3","4","5","6","7","8"),max.cells.per.ident = 300, random.seed = 1)
+DoHeatmap(Bcell.combined_sub, features = top10$gene, size = 3,draw.lines = TRUE)
+```
+
+
+```{r}
+table(Bcell.combined_sub@active.ident, Bcell.combined_sub@meta.data$stim)
+```
+
+
+
+
+```{r,useDingbats=FALSE}
+DefaultAssay(Bcell.combined) <- "integrated"
+top10 <- Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+DoHeatmap(Bcell.combined_filt,cells = c(200:1600), features = top10$gene, size = 3,draw.lines = TRUE)
+```
+
+```{r}
+Bcell.combined_filt <- subset(Bcell.combined, idents = c("0_D0"), invert = TRUE)
+```
+
+
+
+```{r}
+Idents(Bcell.combined_filt) <- "celltype"
+```
+
+```{r}
+cluster.averages <- AverageExpression(Bcell.combined, return.seurat = TRUE)
+```
+
+```{r}
+tissue_rep <- c("Actb","Adam17","B2m","Col1a1","Col3a1","Ctgf","Cxcl10","Cxcr3","Egfr","Egr1","Fbn1","Icam1","Igf1","Il13","Il1b","Il4","Il6","Il8","Itga1","Mmp1","Mmp10","Mmp2","Pdgfa","Plau","Pdgfra","Plaur","Ptgs2","Serpine1","Serpine2","Serpinh1","Tgfa","Tgfb1","Tgfb2","Tgfb3","Thbs1","Timp1","Timp2","Tnfa","Vegfa")
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+FeaturePlot(Bcell.combined, features = rev(tissue_rep[35:39]) , min.cutoff = "q9")
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "integrated"
+top10 <- Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+```
+
+```{r}
+DefaultAssay(cluster.averages) <- "integrated"
+DoHeatmap(cluster.averages, features =tissue_rep,label = TRUE, size = 4,draw.lines = FALSE)
+```
+
+
+
+
+```{r}
+DefaultAssay(Bcell.combined) <- "integrated"
+top_five <- Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 4, wt = avg_logFC)
+DotPlot(Bcell.combined, features = rev(unique(top_five$gene)), dot.scale = 6,split.by = "stim") + RotatedAxis()
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = rev((top_five$gene)[33:36]) , min.cutoff = "q9")
+```
+
+```{r}
+f1 <-DimPlot(Bcell.combined, reduction = "umap",group.by = "orig.ident", split.by = "stim")
+```
+
+```{r}
+f2 <- DimPlot(Bcell.combined, reduction = "umap",group.by = "orig.ident",cols=c("grey","grey"))
+```
+
+
+```{r}
+f22 <- DimPlot(Bcell.combined, reduction = "umap",group.by = "orig.ident",cols=c("red","blue"),split.by = "stim")
+```
+
+```{r}
+f23 <- DimPlot(Bcell.combined, reduction = "umap",group.by = "orig.ident",cols=c("white","blue"))
+```
+
+```{r}
+f3 <- DimPlot(Bcell.combined, reduction = "umap", group.by="celltype",label = TRUE)
+```
+
+```{r}
+f4 <- DimPlot(Bcell.combined, reduction = "umap", group.by="celltype",label = TRUE,split.by = "stim")
+```
+
+```{r}
+plot_grid(f22,f4, ncol = 1, align = "v")
+```
+
+```{r}
+saveRDS(Bcell.combined, file = "Bcell.combined.RDS") 
+```
+
+
+## find only conserved positive markers in each cluster
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers0 <- FindConservedMarkers(Bcell.combined, ident.1 = 0, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+head(Bcell.combined.markers0,20)
+
+write.table(Bcell.combined.markers0, "Bcell.combined.markers0.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers0)[1:50], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers1 <- FindConservedMarkers(Bcell.combined, ident.1 = 1, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+head(Bcell.combined.markers0,20)
+
+write.table(Bcell.combined.markers1, "Bcell.combined.markers1.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers1)[1:20], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers2 <- FindConservedMarkers(Bcell.combined, ident.1 = 2, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+head(Bcell.combined.markers2,20)
+
+write.table(Bcell.combined.markers2, "Bcell.combined.markers2.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers2)[1:20], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers3 <- FindConservedMarkers(Bcell.combined, ident.1 = 3, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+head(Bcell.combined.markers3,20)
+
+write.table(Bcell.combined.markers3, "Bcell.combined.markers3.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers3)[1:20], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers4 <- FindConservedMarkers(Bcell.combined, ident.1 = 4, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.25, only.pos = TRUE)
+head(Bcell.combined.markers4,20)
+
+write.table(Bcell.combined.markers4, "Bcell.combined.markers4.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers4)[1:20], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.combined.markers8 <- FindConservedMarkers(Bcell.combined, ident.1 = 8, grouping.var = "stim", verbose = FALSE, logfc.threshold = 0.55, only.pos = TRUE)
+head(Bcell.combined.markers8,20)
+
+write.table(Bcell.combined.markers8, "Bcell.combined.markers8.csv", sep = "\t")
+
+
+DotPlot(Bcell.combined, features = rownames(Bcell.combined.markers8)[1:20], cols = c("blue", "red"),split.by = "stim", dot.scale = 5) + RotatedAxis()
+```
+
+
+
+
+
+
+
+
+
+
+```{r}
+new_genes_to_test <- readLines("annika_new_genes.txt")
+```
+
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+plots <- VlnPlot(Bcell.combined, features = rev(new_genes_to_test[33:38]), split.by = "stim", group.by = "seurat_clusters", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol =2 ,nrow=3)
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+plots <- VlnPlot(Bcell.combined, features = c("Cd5","Cd11b","Cd23","Ighm","Ighd","Cd43"), split.by = "stim", group.by = "seurat_clusters", pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+
+
+
+
+
+
+
+#find only positive and negative markers in each cluster
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+Bcell.all_markers0 <- FindMarkers(Bcell.combined, ident.1 = 0, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers0,50)
+write.table(Bcell.all_markers0, "Bcell.all_markers0.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers1 <- FindMarkers(Bcell.combined, ident.1 = 1, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers1,50)
+write.table(Bcell.all_markers1, "Bcell.all_markers1.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers2 <- FindMarkers(Bcell.combined, ident.1 = 2, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers2,50)
+write.table(Bcell.all_markers2, "Bcell.all_markers2.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers3 <- FindMarkers(Bcell.combined, ident.1 = 3, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers3,50)
+write.table(Bcell.all_markers3, "Bcell.all_markers3.csv", sep = "\t")
+```
+
+
+```{r}
+
+Bcell.all_markers4 <- FindMarkers(Bcell.combined, ident.1 = 4, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers4,50)
+write.table(Bcell.all_markers4, "Bcell.all_markers4.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers5 <- FindMarkers(Bcell.combined, ident.1 = 5, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers5,50)
+write.table(Bcell.all_markers5, "Bcell.all_markers5.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers6 <- FindMarkers(Bcell.combined, ident.1 = 6, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers6,50)
+write.table(Bcell.all_markers6, "Bcell.all_markers6.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers7 <- FindMarkers(Bcell.combined, ident.1 = 7, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers7,50)
+write.table(Bcell.all_markers7, "Bcell.all_markers7.csv", sep = "\t")
+```
+
+```{r}
+
+Bcell.all_markers8 <- FindMarkers(Bcell.combined, ident.1 = 8, verbose = FALSE, logfc.threshold = 0.25)
+head(Bcell.all_markers8,50)
+write.table(Bcell.all_markers8, "Bcell.all_markers8.csv", sep = "\t")
+```
+
+```{r}
+save(Bcell.combined,file="Bcell.combined.Robj")
+```
+
+
+#Differential expression of genes between day 0 and day 14 in each cluster seperately.
+
+```{r}
+Bcell.combined$celltype.stim <- paste(Idents(Bcell.combined), Bcell.combined$stim, sep = "_")
+Bcell.combined$celltype <- Idents(Bcell.combined)
+Idents(Bcell.combined) <- "celltype.stim"
+```
+
+
+```{r}
+table(Bcell.combined@active.ident)
+```
+
+
+```{r}
+table(Bcell.combined@active.ident, Bcell.combined@meta.data$stim)
+```
+
+
+```{r}
+cluster0_DE <- FindMarkers(Bcell.combined, ident.1 = "0_D14", ident.2 = "0_D0", verbose = FALSE)
+head(cluster0_DE, n = 15)
+write.table(cluster0_DE, "cluster0_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster0_DE)[1:23], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Leu1"), max.cutoff = 3, 
+    cols = c("grey", "red"))
+```
+"Bcl2","Thap3","Stk17b","Triap1","Arel1","Nol3","Casp2","Bcl2l13","Csrnp1","Bcl2l11" "Cidea"
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Bcl2","Thap3","Stk17b","Triap1"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cd8b1","Ms4a4b","Cd3d","Cd3g"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+
+#
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Plekha5","Mapk12","Il18r1","Il7r","Apoe","Sema4f"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Fosl2","Egr3","Fosb","Il7r","Neat1"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cxcl10","Il12b","Tnf","Fas","Bcl3","Ccl5"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+```{r,eval=FALSE, echo=FALSE}
+par(las=2)
+DotPlot(object = Bcell.combined, features = c("Cdc20" ,  "Rangap1", "Ncapd2" , "Dlgap5" , "Cdca2"  , "Cdca8"  , "Ect2","Aurkb" ,  "Bub1",    "Kif11"  ,  "Gtse1"  , "Hjurp" ,  "Cdca3"  , "Hn1", "Mki67" ,  "Tmpo" ,   "Cenpf",   "Tacc3" , "Smc4" ,   "Ccnb2" ,   "Ckap2","Kif23" ,  "Hmmr"  ,  "Aurka" ,  "Psrc1" ,    "Lbr"  ,   "Ckap5" ,  "Cenpe"  , "Ctcf"  ,  "Nek2","Hmgb2" ,  "Cdk1" ,   "Nusap1" ,   "Birc5"  , "Tpx2"  ,     "Ndc80" ,  "Cks2",  "Nuf2" ), plot.legend = TRUE, cols.use = c("lightblue","red"), group.by = "celltype",dot.scale = 5) + RotatedAxis()
+```
+
+IgM
+IgD
+IgA
+JChain
+CCR10
+Aicda
+Basp1
+Rgs13
+Lmnb1
+Blimp1
+Pax5
+Bcl6
+Xbp1
+Cd44
+Nf5e
+Egr1
+Egr2
+Egr3
+Bcl2a1b
+Nr4a1
+Irf7
+Irf8
+Irgm1
+Zpb1
+Tap1
+Serpinag
+Serpinaf
+Nme1
+Nme2
+Prmt1
+Srm
+Cd9
+Rac2
+Rack1
+Eif3f
+Rpl24
+Rpl10
+Rps12
+Tsc22d3
+Mef2c
+Ets1
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("IgHm","Ighd","Igha","Jchain","Ccr10","Aicda","Basp1","Rgs13","Lmnb1","Blimp1","Pax5","Bcl6","Xbp1","Cd44","Nf5e","Egr1","Egr2","Egr3","Bcl2a1b","Nr4a1","Irf7","Irf8","Irgm1","Zpb1","Tap1","Serpina3g","Serpina3f","Nme1","Nme2","Prmt1","Srm","Cd9","Rac2","Rack1","Eif3f","Rpl24","Rpl10","Rps12","Tsc22d3","Mef2c","Ets1"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+`
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Zbp1","Eif3f","Rpl24","Rpl10","Rps12","Tsc22d3","Mef2c","Ets1"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 4)
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cyp27a1","Gpr55","Il1b","Il18"), split.by = "stim", group.by = "celltype", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 2)
+```
+
+```{r}
+ DotPlot(Bcell.combined, features = c("Cyp27a1","Gpr55","Il1b","Il18"),split.by="stim", cols = c("red","blue"))
+
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cyp27a1","Gpr55","Il1b","Il18"), split.by = "stim", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 2)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Jchain","Ccr6","Ccr10","Ighd","Ighm","Igha"), max.cutoff = 3, cols = c("grey", "red"),split.by = "stim")
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cxcr4","Cxcl10","Cxcl5","Cxcl13","Ccl20","Ccl8"), max.cutoff = 3, cols = c("grey", "red"),split.by = "stim")
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cyp27a1","Gpr55","Il1b"), max.cutoff = 3, cols = c("grey", "red"))
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cxcr4","Cxcl10","Cxcl5","Cxcl13","Ccl20","Ccl8"), split.by = "stim", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+
+# de genes
+
+```{r}
+cluster1_DE <- FindMarkers(Bcell.combined, ident.1 = "1_D14", ident.2 = "1_D0", verbose = FALSE)
+head(cluster1_DE, n = 15)
+write.table(cluster1_DE, "cluster1_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster1_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster2_DE <- FindMarkers(Bcell.combined, ident.1 = "2_D14", ident.2 = "2_D0", verbose = FALSE)
+head(cluster2_DE, n = 15)
+write.table(cluster2_DE, "cluster2_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster2_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster3_DE <- FindMarkers(Bcell.combined, ident.1 = "3_D14", ident.2 = "3_D0", verbose = FALSE)
+head(cluster3_DE, n = 15)
+write.table(cluster3_DE, "cluster3_DE.csv", sep = "\t")
+```
+
+```{r}
+cluster3_DE_pos <- FindMarkers(Bcell.combined, ident.1 = "3_D14", ident.2 = "3_D0", verbose = FALSE,only.pos="TRUE")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster3_DE_pos)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+DotPlot(Bcell.combined, features =c("Serpina3f","Pkib","Irf8","Fam174a","Serpina3g","Egln2","Chchd10","Mrpl52","Ptpn1","Zbp1"), cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster4_DE <- FindMarkers(Bcell.combined, ident.1 = "4_D14", ident.2 = "4_D0", verbose = FALSE)
+head(cluster4_DE, n = 15)
+write.table(cluster4_DE, "cluster4_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster4_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster5_DE <- FindMarkers(Bcell.combined, ident.1 = "5_D14", ident.2 = "5_D0", verbose = FALSE)
+head(cluster5_DE, n = 15)
+write.table(cluster5_DE, "cluster5_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster5_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster6_DE <- FindMarkers(Bcell.combined, ident.1 = "6_D14", ident.2 = "6_D0", verbose = FALSE)
+head(cluster6_DE, n = 15)
+write.table(cluster6_DE, "cluster6_DE.csv", sep = "\t")
+```
+
+```{r}
+cluster6_DE_pos <- FindMarkers(Bcell.combined, ident.1 = "6_D14", ident.2 = "6_D0", verbose = FALSE,only.pos="TRUE")
+```
+
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster6_DE_pos)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster7_DE <- FindMarkers(Bcell.combined, ident.1 = "7_D14", ident.2 = "7_D0", verbose = FALSE,ony.pos="TRUE")
+head(cluster7_DE, n = 15)
+#write.table(cluster7_DE, "cluster7_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster7_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+```{r}
+cluster8_DE <- FindMarkers(Bcell.combined, ident.1 = "8_D14", ident.2 = "8_D0", verbose = FALSE)
+head(cluster8_DE, n = 15)
+write.table(cluster8_DE, "cluster8_DE.csv", sep = "\t")
+```
+
+```{r}
+DotPlot(Bcell.combined, features = rownames(cluster8_DE)[1:20], cols = c("blue", "red"),group.by = "celltype.stim", dot.scale = 5) + RotatedAxis()
+```
+
+
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Sell"), max.cutoff = 3, 
+    cols = c("grey", "red"))
+```
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Cxcr4","Cxcl10","Cxcl5","Cxcl13","Ccl20","Ccl8"), split.by = "stim", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cd19","Igha","Ighm","Ighd",""), max.cutoff = 4, cols = c("grey", "red"),order = T)
+#CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+```{r}
+
+FeaturePlot(Bcell.combined, features = c("Ly6a","Cd274","Cd19","Igha","Ighm","Ighd",""), max.cutoff = 3, cols = c("grey", "red"),split.by = "stim")
+#CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Serpina3g","Serpina3f","Zbp1","Stat1"), max.cutoff = 3, cols = c("grey", "red"),split.by = "stim")
+#CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+
+```{r}
+Bcell.combined_Ly6a_Cd274_Sell <- subset(Bcell.combined, subset = Ly6a > 0 & Cd274 > 0 & Sell > 0)
+```
+
+```{r}
+FeaturePlot(Bcell.combined_Ly6a, features = c("Ly6a","Cd274","Cd19","Igha"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim")
+```
+
+```{r}
+FeaturePlot(Bcell.combined_Ly6a_Cd274_Sell, features = c("Ly6a","Cd274","Sell"), cols = c("grey", "blue"),split.by = "stim")
+```
+
+```{r}
+FeaturePlot(Bcell.combined_Ly6a_Cd274_Sell, features = c("Cd55","Fcer2a"), cols = c("grey", "blue"),split.by = "stim")
+```
+
+
+```{r}
+B_count_raw <- as.data.frame(Bcell.combined)
+```
+##########################################################################################
+#sca1+pdl1  B Cells vs all the other B cells cells (7 feb 2021) day 14
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Ly6a","Cd274"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Stat1","Zbp1"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cd79a","Cd79b"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cd3g","Cd4"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Cd8a","Cd4"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Il7r","Cd8a"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+```{r}
+FeaturePlot(Bcell.combined, features = c("Ms4a1"), max.cutoff = 3, cols = c("grey", "blue"),split.by = "stim",order=T)
+```
+
+
+```{r}
+DefaultAssay(Bcell.combined) <- "RNA"
+```
+
+
+```{r}
+plots <- VlnPlot(Bcell.combined, features = c("Ly6a","Cd274"), split.by = "stim", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 2, nrow= 3)
+```
+
+```{r}
+#Bcell.combined$celltype.stim <- paste(Idents(Bcell.combined), Bcell.combined$stim, sep = "_")
+#Bcell.combined$celltype <- Idents(Bcell.combined)
+#Idents(Bcell.combined) <- "celltype.stim"
+```
+
+```{r}
+Idents(Bcell.combined) <- "orig.ident"
+```
+
+```{r}
+Bcells.combined_d14 <- subset(Bcell.combined, idents = c("B14"))
+```
+
+```{r}
+Bcells.combined_d0 <- subset(Bcell.combined, idents = c("B0"))
+```
+# day 14 sca pdl1 positive vs negative
+```{r}
+B_d14_sca1_pdl1_positive <- subset(Bcells.combined_d14, Ly6a > 0 & Cd274 > 0) 
+```
+
+
+```{r}
+B_d14_sca1_pdl1_negative <- subset(Bcells.combined_d14, Ly6a == 0 & Cd274 == 0) 
+```
+
+
+
+```{r}
+B_d14_sca1_pdl1_positive <- NormalizeData(B_d14_sca1_pdl1_positive)
+B_d14_sca1_pdl1_negative <- NormalizeData(B_d14_sca1_pdl1_negative)
+```
+
+```{r}
+B_d14_sca1_pdl1_positive <- FindVariableFeatures(B_d14_sca1_pdl1_positive, selection.method = "vst", nfeatures = 2000)
+B_d14_sca1_pdl1_negative <- FindVariableFeatures(B_d14_sca1_pdl1_negative, selection.method = "vst", nfeatures = 2000)
+```
+
+```{r}
+top_2000_d14_sca1_pdl1_pos <- head(VariableFeatures(B_d14_sca1_pdl1_positive), 2000)
+top_2000_d14_sca1_pdl1_neg <- head(VariableFeatures(B_d14_sca1_pdl1_negative), 2000)
+```
+```{r}
+genes.use_sca1_pdl1 <- unique(c(top_2000_d14_sca1_pdl1_pos, top_2000_d14_sca1_pdl1_neg))
+```
+
+
+```{r}
+genes_commoin.use_sca1_pdl1 <- intersect(c(top_2000_d14_sca1_pdl1_pos,top_2000_d14_sca1_pdl1_neg))
+```
+
+
+
+Scaling the B_d14_sca1_pdl1_positive
+
+```{r}
+all.genes <- rownames(B_d14_sca1_pdl1_positive)
+B_d14_sca1_pdl1_positive <- ScaleData(B_d14_sca1_pdl1_positive, features = all.genes)
+```
+
+Scaling the B_d14_sca1_pdl1_negative
+
+
+```{r}
+all.genes <- rownames(B_d14_sca1_pdl1_negative)
+B_d14_sca1_pdl1_negative <- ScaleData(B_d14_sca1_pdl1_negative, features = all.genes)
+```
+
+```{r}
+B_d14_sca1_pdl1_positive$stim <- "sca1/pdl1+"
+B_d14_sca1_pdl1_negative$stim <- "sca1/pdl1-"
+```
+
+
+#finding anchors for the data
+```{r}
+sca1_pdl1.anchors <- FindIntegrationAnchors(object.list = list(B_d14_sca1_pdl1_positive,B_d14_sca1_pdl1_negative), dims = 1:20)
+```
+
+```{r}
+sca1_pdl1_pos_neg.combined <- IntegrateData(anchorset = sca1_pdl1.anchors, dims = 1:20)
+```
+
+Run a single integrated analysis
+
+```{r}
+DefaultAssay(sca1_pdl1_pos_neg.combined) <- "integrated"
+sca1_pdl1_pos_neg.combined <- ScaleData(sca1_pdl1_pos_neg.combined, verbose = FALSE)
+sca1_pdl1_pos_neg.combined <- RunPCA(sca1_pdl1_pos_neg.combined, npcs = 30, verbose = FALSE)
+# t-SNE and Clustering
+sca1_pdl1_pos_neg.combined <- FindNeighbors(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+sca1_pdl1_pos_neg.combined <- FindClusters(sca1_pdl1_pos_neg.combined, resolution = 0)
+sca1_pdl1_pos_neg.combined <- RunTSNE(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+sca1_pdl1_pos_neg.combined <- RunUMAP(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+# Bcell.combined <- FindNeighbors(Bcell.combined, reduction = "pca", dims = 1:20)
+# Bcell.combined <- FindClusters(Bcell.combined, resolution = 0.5)
+```
+
+
+```{r}
+Idents(sca1_pdl1_pos_neg.combined) <- "stim"
+```
+
+
+
+```{r}
+sca1_pdl1_pos_neg.combined.markers <- FindAllMarkers(sca1_pdl1_pos_neg.combined, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.1)
+```
+
+```{r}
+write.table(sca1_pdl1_pos_neg.combined.markers,"sca1_pdl1_pos_neg.combined.markers.tsv", sep = "\t")
+```
+
+```{r}
+#Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+```
+
+```{r,useDingbats=FALSE}
+#DefaultAssay(Bcell.combined) <- "integrated"
+top10 <- sca1_pdl1_pos_neg.combined.markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_logFC)
+DoHeatmap(sca1_pdl1_pos_neg.combined, features = top10$gene,group.by = "stim",label = TRUE, size = 3,  draw.lines = TRUE)
+#cells = c(1000:3500),
+```
+
+### sca1_pdl1 b cells vs rest of b cells in day 0
+
+# #####################day 14 sca pdl1 positive vs negative B cell at day 0
+```{r}
+B_d0_sca1_pdl1_positive <- subset(Bcells.combined_d0, Ly6a > 0 & Cd274 > 0) 
+```
+
+
+```{r}
+B_d0_sca1_pdl1_negative <- subset(Bcells.combined_d0, Ly6a == 0 & Cd274 == 0) 
+```
+
+
+
+```{r}
+B_d0_sca1_pdl1_positive <- NormalizeData(B_d0_sca1_pdl1_positive)
+B_d0_sca1_pdl1_negative <- NormalizeData(B_d0_sca1_pdl1_negative)
+```
+
+```{r}
+B_d0_sca1_pdl1_positive <- FindVariableFeatures(B_d0_sca1_pdl1_positive, selection.method = "vst", nfeatures = 2000)
+B_d0_sca1_pdl1_negative <- FindVariableFeatures(B_d0_sca1_pdl1_negative, selection.method = "vst", nfeatures = 2000)
+```
+
+```{r}
+top_2000_d0_sca1_pdl1_pos <- head(VariableFeatures(B_d0_sca1_pdl1_positive), 2000)
+top_2000_d0_sca1_pdl1_neg <- head(VariableFeatures(B_d0_sca1_pdl1_negative), 2000)
+```
+```{r}
+genes.use_sca1_pdl1 <- unique(c(top_2000_d0_sca1_pdl1_pos, top_2000_d0_sca1_pdl1_neg))
+```
+
+
+```{r}
+genes_commoin.use_sca1_pdl1 <- intersect(c(top_2000_d0_sca1_pdl1_pos,top_2000_d0_sca1_pdl1_neg))
+```
+
+
+
+Scaling the B_d0_sca1_pdl1_positive
+
+```{r}
+all.genes <- rownames(B_d0_sca1_pdl1_positive)
+B_d0_sca1_pdl1_positive <- ScaleData(B_d0_sca1_pdl1_positive, features = all.genes)
+```
+
+Scaling the B_d0_sca1_pdl1_negative
+
+
+```{r}
+all.genes <- rownames(B_d0_sca1_pdl1_negative)
+B_d0_sca1_pdl1_negative <- ScaleData(B_d0_sca1_pdl1_negative, features = all.genes)
+```
+
+```{r}
+B_d0_sca1_pdl1_positive$stim <- "sca1/pdl1+"
+B_d0_sca1_pdl1_negative$stim <- "sca1/pdl1-"
+```
+
+
+#finding anchors for the data
+```{r}
+sca1_pdl1.anchors <- FindIntegrationAnchors(object.list = list(B_d0_sca1_pdl1_positive,B_d0_sca1_pdl1_negative), dims = 1:20)
+```
+
+```{r}
+sca1_pdl1_pos_neg.combined <- IntegrateData(anchorset = sca1_pdl1.anchors, dims = 1:20)
+```
+
+Run a single integrated analysis
+
+```{r}
+DefaultAssay(sca1_pdl1_pos_neg.combined) <- "integrated"
+sca1_pdl1_pos_neg.combined <- ScaleData(sca1_pdl1_pos_neg.combined, verbose = FALSE)
+sca1_pdl1_pos_neg.combined <- RunPCA(sca1_pdl1_pos_neg.combined, npcs = 30, verbose = FALSE)
+# t-SNE and Clustering
+sca1_pdl1_pos_neg.combined <- FindNeighbors(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+sca1_pdl1_pos_neg.combined <- FindClusters(sca1_pdl1_pos_neg.combined, resolution = 0)
+sca1_pdl1_pos_neg.combined <- RunTSNE(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+sca1_pdl1_pos_neg.combined <- RunUMAP(sca1_pdl1_pos_neg.combined, reduction = "pca", dims = 1:20)
+# Bcell.combined <- FindNeighbors(Bcell.combined, reduction = "pca", dims = 1:20)
+# Bcell.combined <- FindClusters(Bcell.combined, resolution = 0.5)
+```
+
+
+```{r}
+Idents(sca1_pdl1_pos_neg.combined) <- "stim"
+```
+
+
+
+```{r}
+sca1_pdl1_pos_neg.combined.markers <- FindAllMarkers(sca1_pdl1_pos_neg.combined, only.pos = TRUE, min.pct = 0.1, logfc.threshold = 0.1)
+```
+
+```{r}
+write.table(sca1_pdl1_pos_neg.combined.markers,"sca1_pdl1_pos_neg.combined.markers_day0.tsv", sep = "\t")
+```
+
+```{r}
+#Bcell.combined.markers %>% group_by(cluster) %>% top_n(n = 5, wt = avg_logFC)
+```
+
+```{r,useDingbats=FALSE}
+#DefaultAssay(Bcell.combined) <- "integrated"
+top10 <- sca1_pdl1_pos_neg.combined.markers %>% group_by(cluster) %>% top_n(n = 20, wt = avg_logFC)
+DoHeatmap(sca1_pdl1_pos_neg.combined, features = top10$gene,group.by = "stim",label = TRUE, size = 3,  draw.lines = TRUE)
+#cells = c(1000:3500),
+```
+

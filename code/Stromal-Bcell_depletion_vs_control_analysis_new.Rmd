@@ -1,0 +1,819 @@
+---
+title: 'B cell depletion vs control condition: single cell analysis on heterogenous and stromal cells cell population in the intestine, 17th march: subsetting the object into epithelial'
+output:
+  html_notebook: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+suppressPackageStartupMessages({
+library(Seurat)
+library(dplyr)
+library(venn)
+library(cowplot)
+})
+```
+## loading the data
+```{r loading_data, cache=TRUE, message=FALSE}
+
+combined_data_filt_final.int <- readRDS("combined_data_filt_final.int.rds")
+```
+
+## subsetting the seurat object into epithilial and stromal object seperately
+
+```{r}
+
+combined_data_filt_final.int_epi <- subset(combined_data_filt_final.int, idents = c("0", "4", "10"))
+
+combined_data_filt_final.int_stromal <- subset(combined_data_filt_final.int, idents = c("1", "2", "3","5","6","7","9"))
+```
+
+#dimension
+```{r}
+print(names(combined_data_filt_final.int_epi@reductions))
+print(names(combined_data_filt_final.int_stromal@reductions))
+dim(combined_data_filt_final.int_stromal)
+```
+
+```{r}
+rm(combined_data_filt_final.int)
+```
+
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+})
+```
+
+```{r}
+epi_cells <- DietSeurat(combined_data_filt_final.int_epi, counts = TRUE, data = TRUE, scale.data = FALSE)
+```
+
+```{r}
+stromal_cells <- DietSeurat(combined_data_filt_final.int_stromal, counts = TRUE, data = TRUE, scale.data = FALSE)
+```
+
+```{r}
+DefaultAssay(epi_cells) <- "RNA"
+DefaultAssay(stromal_cells) <- "RNA"
+```
+
+
+## splitiing the object
+
+```{r}
+epi_cells_list <- SplitObject(epi_cells, split.by = "orig.ident")
+stromal_cells_list <- SplitObject(stromal_cells, split.by = "orig.ident")
+```
+
+
+
+
+
+### stromal_cells
+```{r}
+for (i in 1:length(stromal_cells_list)) {
+    stromal_cells_list[[i]] <- NormalizeData(stromal_cells_list[[i]], verbose = FALSE)
+    stromal_cells_list[[i]] <- FindVariableFeatures(stromal_cells_list[[i]], selection.method = "vst", nfeatures = 2000,verbose = FALSE)
+}
+
+#hvgs_per_dataset <- lapply(epi_cells_list, function(x) { x@assays$RNA@var.features })
+#venn::venn(hvgs_per_dataset,opacity = .4,zcolor = scales::hue_pal()(3),cexsn = 1,cexil = 1,lwd=1,col="white",frame=F,borders = NA)
+```
+
+```{r}
+hvgs_per_dataset <- lapply(stromal_cells_list, function(x) { x@assays$RNA@var.features })
+venn::venn(hvgs_per_dataset,opacity = .4,zcolor = scales::hue_pal()(3),cexsn = 1,cexil = 1,lwd=1,col="white",frame=F,borders = NA)
+```
+
+```{r}
+stromal.anchors <- FindIntegrationAnchors(object.list = stromal_cells_list, dims = 1:20)
+```
+## integrating the data
+```{r}
+stromal.int <- IntegrateData(anchorset = stromal.anchors, dims = 1:20, new.assay.name = "integrated")
+```
+```{r}
+names(stromal.int@assays)
+```
+
+## Dimensionality reduction at integrated space
+
+```{r}
+stromal.int <- ScaleData(stromal.int, verbose = FALSE,assay = "integrated")
+stromal.int <- RunPCA(stromal.int, npcs = 20, verbose = FALSE, assay = "integrated",reduction.name = "PCA_on_integrated")
+stromal.int <- RunUMAP(stromal.int, reduction = "PCA_on_integrated", dims = 1:20,reduction.name = "UMAP_on_integrated")
+stromal.int <- RunTSNE(stromal.int, reduction = "PCA_on_integrated", dims = 1:30,reduction.name = "TSNE_on_integrated")
+
+```
+## plotting pca, tsne and umap for both non integrated and integrated data
+
+```{r}
+plot_grid(ncol = 2,
+  #DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident"),
+  #DimPlot(combined_data_filt_final, reduction = "TSNE_on_RNA", group.by = "orig.ident"),
+  #DimPlot(combined_data_filt_final, reduction = "UMAP_on_RNA", group.by = "orig.ident"),
+  
+  DimPlot(stromal.int, reduction = "PCA_on_integrated", group.by = "orig.ident"),
+  DimPlot(stromal.int, reduction = "TSNE_on_integrated", group.by = "orig.ident"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "orig.ident")
+)
+```
+
+```{r}
+DefaultAssay(stromal.int) <- "RNA"
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Abca1","Cyp27a1","Vim","Thy1","Map3k2"),ncol = 2,order = T)
+```
+
+```{r}
+DefaultAssay(stromal.int) <- "RNA"
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Map3k2"),ncol = 2,order = T,split.by = "orig.ident")
+```
+```{r}
+VlnPlot(stromal.int, features = c("Map3k2"), split.by = "orig.ident")
+```
+
+
+## clustering the integrated dataset using grapgh based clustering
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+  library(pheatmap)
+  library(rafalib)
+})
+
+```
+
+```{r}
+stromal.int <- FindNeighbors(stromal.int,
+                         reduction = "PCA_on_integrated",
+                         dims = 1:20,
+                         k.param = 60,
+                         prune.SNN = 1/15)
+```
+```{r}
+names(stromal.int@graphs)
+```
+##Building kNN / SNN graph
+```{r}
+pheatmap(stromal.int@graphs$integrated_nn[1:200,1:200],
+         col=c("white","black"),border_color = "grey90",
+         legend = F,cluster_rows = F,cluster_cols = F,fontsize = 2)
+```
+## Clustering on graph
+
+```{r}
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = 0 , algorithm = 1)
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = .2 , algorithm = 1)
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = .3 , algorithm = 1)
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = .5 , algorithm = 1)
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = 1  , algorithm = 1)
+stromal.int <- FindClusters(stromal.int, graph.name = "integrated_snn", resolution = 2  , algorithm = 1)
+
+plot_grid(ncol = 2,
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0")+ggtitle("louvain_0"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2")+ggtitle("louvain_0.2"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3")+ggtitle("louvain_0.3"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5")+ggtitle("louvain_0.5"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.1")+ggtitle("louvain_1"),
+  DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.2")+ggtitle("louvain_2")
+)
+```
+```{r}
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5", label="T")+ggtitle("louvain_0.5")
+```
+
+
+```{r}
+#pdf("umap_split_stromal.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label="T",split.by = "orig.ident")+ggtitle("louvain_0.3")
+#"dev.off()
+```
+```{r}
+pdf("umap_stromal.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label="T")+ggtitle("louvain_0.3")
+dev.off()
+```
+
+
+```{r}
+#DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label = "T")+ggtitle("louvain_0.3")
+```
+
+```{r}
+#FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cldn3","Lgr5","Vim","Acta2","Epcam"),ncol = 2,order = T,)
+```
+
+
+
+
+
+
+```{r}
+sessionInfo()
+```
+
+## Differential gene expression
+
+```{r}
+suppressPackageStartupMessages({
+    library(Seurat)
+    library(venn)
+    library(dplyr)
+    library(cowplot)
+    library(ggplot2)
+    library(pheatmap)
+    library(rafalib)
+})
+
+```
+
+```{r}
+print(stromal.int@active.ident[1:10])
+```
+
+```{r}
+stromal.int <- SetIdent(stromal.int, value = "integrated_snn_res.0.3")
+
+```
+
+
+```{r}
+VlnPlot(stromal.int, features = c("Map3k2"), split.by = "orig.ident")
+```
+```{r}
+plots <- VlnPlot(stromal.int, features = c("Map3k2"), split.by = "orig.ident", group.by = "integrated_snn_res.0.3", 
+    pt.size = 0, combine = FALSE)
+CombinePlots(plots = plots, ncol = 1)
+```
+
+
+```{r}
+pdf("violinplot-stromal-markers-21october.pdf")
+plots <- VlnPlot(stromal.int, features = c("Sparc","Eln","Col3a1","Col1a1"), split.by = "orig.ident", group.by = "integrated_snn_res.0.3", 
+    pt.size = 0, combine = FALSE,split.plot = TRUE)
+CombinePlots(plots = plots, ncol = 2)
+dev.off()
+```
+
+
+
+
+```{r}
+# Compute differentiall expression
+stromal.int_markers_genes <- FindAllMarkers(stromal.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+
+```{r}
+# Compute differentiall expression
+stromal.int_markers_genes_new <- FindAllMarkers(stromal.int,  only.pos = TRUE,  assay = "RNA")
+```
+
+
+```{r}
+top25 <- stromal.int_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+top25
+```
+
+
+```{r}
+pdf("markers_cluster.pdf")
+mypar(1, 3, mar = c(4, 6, 3, 1))
+for (i in unique(top25$cluster)) {
+    barplot(sort(setNames(top25$avg_logFC, top25$gene)[top25$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+#dev.off()
+}
+dev.off()
+```
+
+```{r}
+pdf("heatmap_stromal.pdf")
+#top10 <- stromal.int_markers_genes %>% group_by(cluster) %>% top_n(-10, p_val_adj)
+
+#alldata <- ScaleData(stromal.int, features = as.character(unique(top10$gene)), assay = "RNA")
+DoHeatmap(alldata, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", assay = "RNA") + theme(text = element_text(size = 8))
+dev.off()
+```
+
+```{r}
+#top5 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-5, p_val_adj)
+
+#alldata <- ScaleData(combined_data_filt_final.int, features = as.character(unique(top10$gene)), assay = "RNA")
+#DoHeatmap(alldata, features = as.character(unique(top5$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA") + theme(text = element_text(size = 5))
+```
+
+
+```{r}
+pdf("dotplot_split_stromal.pdf")
+DotPlot(stromal.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+
+```{r}
+pdf("dotplot_stromal.pdf")
+DotPlot(stromal.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3",dot.scale = 2, assay = "RNA") + coord_flip() +theme(text = element_text(size = 10)) +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+
+```{r}
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" ,label = "T")
+```
+
+```{r}
+#DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0",split.by = "orig.ident" )
+```
+
+#### resolution 0.2
+
+
+```{r}
+#combined_data_filt_final.int <- SetIdent(combined_data_filt_final.int, value = "integrated_snn_res.0.2")
+
+```
+
+```{r}
+# Compute differentiall expression
+#combined_markers_genes <- FindAllMarkers(combined_data_filt_final.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE, max.cells.per.ident = 50, assay = "RNA")
+```
+
+```{r}
+#res_0.2_top25 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+res_0.2_top25
+```
+
+```{r}
+write.table(stromal.int_markers_genes_new,"Stromal_Marker_genes_each_cluster_new.tsv",sep = "\t")
+```
+
+
+
+
+```{r}
+pdf("Featureplot_VIM_ACTA2_IL6_stromal.pdf")
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Vim","Acta2","Il6" ),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+
+```{r}
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lgals3"),ncol = 2,order = T, split.by = "old.ident")
+```
+
+## differential expression between control vs depletion
+
+```{r}
+cell_selection <- subset(stromal.int, cells = colnames(stromal.int)[stromal.int$integrated_snn_res.0 == 0])
+cell_selection <- SetIdent(cell_selection, value = "old.ident")
+
+```
+
+```{r}
+stromal_DGE__bulk_cell_selection <- FindAllMarkers(cell_selection, assay = "RNA")
+
+```
+
+```{r}
+write.table(stromal_DGE__bulk_cell_selection,"stromal_Diff_exp_gene_bulk_control_vs_depletion.tsv",sep = "\t")
+```
+
+
+
+```{r}
+top52 <- stromal_DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-52, p_val_adj)
+top52
+```
+
+
+```{r}
+pdf("DE_bulk.pdf")
+mypar(1, 2, mar = c(4, 6, 3, 1))
+for (i in unique(top52$cluster)) {
+    barplot(sort(setNames(top52$avg_logFC, top52$gene)[top52$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+dev.off()
+```
+
+```{r}
+#top50 <- DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-50, p_val_adj)
+
+cell_selection <- ScaleData(cell_selection, features = as.character(unique(top52$gene)), assay = "RNA")
+DoHeatmap(cell_selection, features = as.character(unique(top52$gene)), assay = "RNA") + theme(text = element_text(size = 10))
+```
+## charecterizing the cluster using literaure based genes doi:10.1038/nature24489
+
+```{r}
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" , label = "T")
+```
+
+```{r}
+saveRDS(stromal.int, file = "stromal.int.RDS") 
+```
+
+
+
+## stromal cells : C1qtnf3,Dkk2
+```{r}
+pdf("featureplot_stromal_cell_markers.pdf")
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("C1qtnf3","Dkk2","Ackr4","Cxcl5","Has1","Ednrb" ),ncol = 3,order = T)
+dev.off()
+```
+
+#other cells 
+```{r}
+pdf("featureplot_other_cell_markers.pdf")
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lyve1","Actg2","Top2a","Cd74","Rgs4","Slpi"),ncol = 3,order = T)
+dev.off()
+```
+## stromal cell canonical marker : pericyte
+```{r}
+pdf("featureplot_stromalcell_known_markers_pericyte.pdf")
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cspg4","Pdgfrb","Cd34", "Pdpn", "Pdgfra"),ncol = 3,order = T)
+dev.off()
+```
+
+
+
+
+
+
+
+```{r}
+levels(stromal.int)
+```
+
+```{r}
+new.cluster.ids <- c("Ednrb+ stromal","Pericyte-like stromal","C1qtnf3+Has1+Ackr4+ stromal", "C1qtnf3+Has1+ stromal","C1qtnf3+ stromal","Dkk2 + stromal", "Pericyte1", "pericyte2" )
+names(new.cluster.ids) <- levels(stromal.int)
+stromal.int <- RenameIdents(stromal.int, new.cluster.ids)
+#DimPlot(epi.int, reduction = "UMAP_on_integrated", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+```{r}
+pdf("UMAP_cluster_charecterization.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", label = TRUE , pt.size = 0.5) + NoLegend()
+dev.off()
+```
+
+```{r}
+pdf("UMAP_cluster_charecterization_split.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", label = FALSE, pt.size = 0.5,split.by = "orig.ident") 
+dev.off()
+```
+
+```{r}
+pdf("basic_statistics_on_cluster.pdf")
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+cowplot::plot_grid(ncol = 1,
+VlnPlot(stromal.int, features = feats, pt.size = 0.1,ncol = 2) + NoLegend())
+dev.off()
+```
+
+```{r}
+RidgePlot(stromal.int, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+```
+
+
+```{r}
+pdf("dotplot_split_stromal_proliferation_markers_s.genes.pdf")
+DotPlot(stromal.int, features = c("Mcm5","Pcna","Tyms","Fen1","Mcm2","Mcm4","Mcm6","Cdca7","Prim1","Mlf1p","Gmnn","Cdc45","Cdc6","Exo1","Ccne2","Dscc1","Pold3","Msh2","Atad2","Clspn"), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+```{r}
+pdf("dotplot_split_stromal_proliferation_markers_G2M.genes.pdf")
+DotPlot(stromal.int, features = c("Hmgb2","Mki67","Kif2c","Cdk1","Tmpo","Anp32e","Tubb4b","Ckap5","Ubec2","Tacc3","Cenpe","Cdca2","Ctcf","Cdca8","Top2a","Cdca3","Ect2","Ndc80","Hn1","Cks2","Cdc20","Nuf2","Cenpa","Cdc25c"), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+## differential expression between the condition in each cluster in stromal cell populations
+##"Ednrb+ stromal","Pericyte-like stromal","C1qtnf3+Has1+Ackr4+ stromal", "C1qtnf3+Has1+ stromal","C1qtnf3+ stromal","Dkk2 + stromal", "Pericyte1", "pericyte2" 
+
+Ednrb+ stromal
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+Ednrb_plus <-subset(stromal.int, idents = c("Ednrb+ stromal"))
+Ednrb_plus <- SetIdent(Ednrb_plus, value = "orig.ident")
+# Compute differentiall expression
+DGE_Ednrb_plus <- FindAllMarkers(Ednrb_plus, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_Ednrb_plus,"DGE_Ednrb_plus.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_Ednrb_plus <- DGE_Ednrb_plus %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_Ednrb_plus_DE.pdf")
+VlnPlot(Ednrb_plus, features = as.character(unique(top18_DGE_Ednrb_plus$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+## Pericyte-like stromal
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+Pericyte_like <-subset(stromal.int, idents = c("Pericyte-like stromal"))
+Pericyte_like <- SetIdent(Pericyte_like, value = "orig.ident")
+# Compute differentiall expression
+DGE_Pericyte_like <- FindAllMarkers(Pericyte_like, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_Pericyte_like,"DGE_Pericyte_like.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_Pericyte_like <- DGE_Pericyte_like %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_Pericyte_like_DE.pdf")
+VlnPlot(Pericyte_like, features = as.character(unique(top18_DGE_Pericyte_like$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+
+## C1qtnf3+Has1+Ackr4+ stromal
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+C1qtnf3_Has1_Ackr4_plus <-subset(stromal.int, idents = c("C1qtnf3+Has1+Ackr4+ stromal"))
+C1qtnf3_Has1_Ackr4_plus <- SetIdent(C1qtnf3_Has1_Ackr4_plus, value = "orig.ident")
+# Compute differentiall expression
+DGE_C1qtnf3_Has1_Ackr4_plus <- FindAllMarkers(C1qtnf3_Has1_Ackr4_plus, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_C1qtnf3_Has1_Ackr4_plus,"DGE_C1qtnf3_Has1_Ackr4_plus.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_C1qtnf3_Has1_Ackr4_plus <- DGE_C1qtnf3_Has1_Ackr4_plus %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_C1qtnf3_Has1_Ackr4_plus_DE.pdf")
+VlnPlot(C1qtnf3_Has1_Ackr4_plus, features = as.character(unique(top18_DGE_Pericyte_like$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+## C1qtnf3+Has1+ stromal
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+C1qtnf3_Has1_plus  <-subset(stromal.int, idents = c("C1qtnf3+Has1+ stromal"))
+C1qtnf3_Has1_plus <- SetIdent(C1qtnf3_Has1_plus, value = "orig.ident")
+# Compute differentiall expression
+DGE_C1qtnf3_Has1_plus <- FindAllMarkers(C1qtnf3_Has1_plus, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_C1qtnf3_Has1_plus,"DGE_C1qtnf3_Has1_plus.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_C1qtnf3_Has1_plus <- DGE_C1qtnf3_Has1_plus %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_C1qtnf3_Has1_plus_DE.pdf")
+VlnPlot(C1qtnf3_Has1_plus, features = as.character(unique(top18_DGE_Pericyte_like$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+## C1qtnf3+ stromal
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+C1qtnf3_plus  <-subset(stromal.int, idents = c("C1qtnf3+ stromal"))
+C1qtnf3_plus <- SetIdent(C1qtnf3_plus, value = "orig.ident")
+# Compute differentiall expression
+DGE_C1qtnf3_plus <- FindAllMarkers(C1qtnf3_plus, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_C1qtnf3_plus,"DGE_C1qtnf3_plus.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_C1qtnf3_plus <- DGE_C1qtnf3_plus %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_C1qtnf3_plus_DE.pdf")
+VlnPlot(C1qtnf3_plus, features = as.character(unique(top18_DGE_C1qtnf3_plus$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+## 
+
+## Dkk2 + stromal
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+Dkk2_plus  <-subset(stromal.int, idents = c("Dkk2 + stromal"))
+Dkk2_plus <- SetIdent(Dkk2_plus, value = "orig.ident")
+# Compute differentiall expression
+DGE_Dkk2_plus <- FindAllMarkers(Dkk2_plus, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_Dkk2_plus,"DGE_Dkk2_plus.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_Dkk2_plus <- DGE_Dkk2_plus %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_Dkk2_plus.pdf")
+VlnPlot(Dkk2_plus, features = as.character(unique(top18_DGE_Dkk2_plus$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+## Pericyte1
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+Pericyte1  <-subset(stromal.int, idents = c("Pericyte1"))
+Pericyte1 <- SetIdent(Pericyte1, value = "orig.ident")
+# Compute differentiall expression
+DGE_Pericyte1 <- FindAllMarkers(Pericyte1, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_Pericyte1,"DGE_Pericyte1.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_Pericyte1 <- DGE_Pericyte1 %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_Pericyte1.pdf")
+VlnPlot(Pericyte1, features = as.character(unique(top18_DGE_Pericyte1$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+## Pericyte2
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+Pericyte2  <-subset(stromal.int, idents = c("pericyte2"))
+Pericyte2 <- SetIdent(Pericyte2, value = "orig.ident")
+# Compute differentiall expression
+DGE_Pericyte2 <- FindAllMarkers(Pericyte2, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_Pericyte2,"DGE_Pericyte2.tsv",sep="\t")
+```
+
+```{r}
+top18_DGE_Pericyte2 <- DGE_Pericyte2 %>% group_by(cluster) %>% top_n(-10, p_val)
+pdf("violinplot_Pericyte2.pdf")
+VlnPlot(Pericyte2, features = as.character(unique(top18_DGE_Pericyte2$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+
+```
+
+```{r}
+pdf("spatial_transcriptomics.pdf")
+#FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Epcam","Lrrc19"),ncol = 4,order = T, split.by = "old.ident")
+FeaturePlot(stromal.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Igfbp5","Col1a2","Col1a1", "Igfb4","Apoe","C4b","Postn","Mgp","Col4a1","Fcer1g","Col4a2","Ptma","Lrp1","Cxcl5"),ncol = 3,order = T)
+dev.off()
+```
+
+counting the number of cells
+```{r}
+freq <- table(stromal.int@active.ident, stromal.int@meta.data$orig.ident)
+write.table(freq,'stromal_freq.tsv', sep = "\t")
+```
+
+```{r, useDingbats=FALSE}
+pdf("stromal_umap_split.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" )
+dev.off()
+```
+
+```{r, useDingbats=FALSE}
+pdf("stroaml_umap_split2.pdf")
+DimPlot(stromal.int, reduction = "UMAP_on_integrated",split.by = "orig.ident" )
+dev.off()
+```
+
+
+Col4a5
+Col6a4
+Col12a1
+Col6a2
+Col4a6
+Col1a1
+Col18a1
+Col5a1
+Col27a1
+Col14a1
+Pcolce2
+Col8a1
+Col15a1
+Col14a1
+Col18a1
+Pcolce
+Col8a1
+Colec12
+Col23a1
+```{r}
+plots <- VlnPlot(stromal.int, features = c("Myh11", "Acta2", "Actg2", "Taglin", "Wnt5", "Bmp2", "Bmp5", "Sox6", "Clu", "Adamdec", "Ednrb", "CD55", "Pcolce2", "Il33", "Has1", "IL6", "CD34", "Vcam1", "Ccl11", "Apoe", "Cxcl5", "Pdpn", "Ptn", "Fibin", "Fbln1", "Mgp","Vim", "Fn1","Col3a1","Col1a1","Col5a2","Col4a5","Col6a4","Col12a1",
+                                           "Col4a6","Col18a1","Col5a1","Col27a1","Col14a1","Col8a1","Col23a1"), split.by = "orig.ident", group.by = "integrated_snn_res.0.3", 
+    pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 3)
+```
+
+## combined markers expression for stromal cell cluster
+#Pericytes: Rgs5 +Cspg4+Pdgrfb+Nes
+#ICC: Kit, Ano1, Prckq, Epha7
+#ICC-FL: Slc4a4, Elovl6, Gja1
+#MF: Myh11, Acta2, Actg2, Taglin
+
+
+```{r}
+pdf("pericytes_cell_markers_combined_exp.pdf")
+pericytes_markers <- c("Rgs5","Cspg4","Nes")
+pericytes_markers_percent <- Matrix::colSums(stromal.int@assays[["RNA"]][pericytes_markers, ])/Matrix::colSums(stromal.int@assays[["RNA"]])
+stromal.int <- AddMetaData(object = stromal.int, metadata = pericytes_markers_percent , col.name = "pericytes_markers_percent")
+FeaturePlot(object = stromal.int, features = "pericytes_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+```{r}
+pdf("ICC_cell_markers_combined_exp.pdf")
+ICC_markers <- c("Kit","Ano1","Epha7")
+ICC_markers_percent <- Matrix::colSums(stromal.int@assays[["RNA"]][ICC_markers, ])/Matrix::colSums(stromal.int@assays[["RNA"]])
+stromal.int <- AddMetaData(object = stromal.int, metadata = ICC_markers_percent , col.name = "ICC_markers_percent")
+FeaturePlot(object = stromal.int, features = "ICC_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+```{r}
+pdf("ICC_cell_markers_combined_exp.pdf")
+ICC_markers <- c("Kit","Ano1","Epha7")
+ICC_markers_percent <- Matrix::colSums(stromal.int@assays[["RNA"]][ICC_markers, ])/Matrix::colSums(stromal.int@assays[["RNA"]])
+stromal.int <- AddMetaData(object = stromal.int, metadata = ICC_markers_percent , col.name = "ICC_markers_percent")
+FeaturePlot(object = stromal.int, features = "ICC_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+
+```{r}
+pdf("ICC_FL_cell_markers_combined_exp.pdf")
+ICC_FL_markers <- c("Slc4a4", "Elovl6", "Gja1")
+ICC_FL_markers_percent <- Matrix::colSums(stromal.int@assays[["RNA"]][ICC_FL_markers, ])/Matrix::colSums(stromal.int@assays[["RNA"]])
+stromal.int <- AddMetaData(object = stromal.int, metadata = ICC_FL_markers_percent , col.name = "ICC_FL_markers_percent")
+FeaturePlot(object = stromal.int, features = "ICC_FL_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+```{r}
+pdf("MF_cell_markers_combined_exp.pdf")
+MF_markers <- c("Myh11", "Acta2", "Actg2")
+MF_markers_percent <- Matrix::colSums(stromal.int@assays[["RNA"]][MF_markers, ])/Matrix::colSums(stromal.int@assays[["RNA"]])
+stromal.int <- AddMetaData(object = stromal.int, metadata = MF_markers_percent , col.name = "MF_markers_percent")
+FeaturePlot(object = stromal.int, features = "MF_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+```{r}
+Idents(stromal.int) <- "integrated_snn_res.0.3"
+```
+
+
+```{r}
+stromal.int@meta.data$celltype.stim <- paste0(stromal.int@active.ident, "_", 
+    stromal.int@meta.data$orig.ident)
+stromal.int[["celltype"]] <- Idents(object = stromal.int)
+Idents(object = stromal.int) <- 'celltype.stim'
+```
+
+
+```{r}
+plots <- VlnPlot(stromal.int, features = c("Myh11", "Acta2", "Actg2", "Wnt5a", "Bmp2", "Bmp5", "Sox6", "Adamdec", "Ednrb", "Cd55", "Pcolce2", "Il33", "Has1", "Il6", "Cd34", "Vcam1", "Ccl11", "Ptn", "Fibin", "Fbln1", "Mgp","Col3a1","Col1a1","Col5a2","Col4a5","Col6a4","Col12a1",
+                                           "Col4a6","Col18a1","Col5a1","Col27a1","Col14a1","Col8a1","Col23a1"), split.by = "orig.ident", group.by = "integrated_snn_res.0.3", 
+    pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 3)
+```
+
+

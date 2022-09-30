@@ -1,0 +1,791 @@
+---
+title: "B cell depletion vs control condition: single cell analysis on heterogenous cell population in the intestine, 17th march: subsetting the object into epithelial and stromal cells"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+suppressPackageStartupMessages({
+library(Seurat)
+library(dplyr)
+library(venn)
+library(cowplot)
+})
+```
+## loading the data
+```{r loading_data, cache=TRUE, message=FALSE}
+
+combined_data_filt_final.int <- readRDS("combined_data_filt_final.int.rds")
+```
+
+## subsetting the seurat object into epithilial and stromal object seperately
+
+```{r}
+
+combined_data_filt_final.int_epi <- subset(combined_data_filt_final.int, idents = c("0", "4", "10"))
+
+combined_data_filt_final.int_stromal <- subset(combined_data_filt_final.int, idents = c("1", "2", "3","5","6","7","9"))
+```
+
+#dimension
+```{r}
+print(names(combined_data_filt_final.int_epi@reductions))
+print(names(combined_data_filt_final.int_stromal@reductions))
+dim(combined_data_filt_final.int_stromal)
+```
+
+```{r}
+rm(combined_data_filt_final.int)
+```
+
+
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+  library(patchwork)
+})
+```
+
+```{r}
+epi_cells <- DietSeurat(combined_data_filt_final.int_epi, counts = TRUE, data = TRUE, scale.data = FALSE)
+```
+
+```{r}
+stromal_cells <- DietSeurat(combined_data_filt_final.int_stromal, counts = TRUE, data = TRUE, scale.data = FALSE)
+```
+
+```{r}
+DefaultAssay(epi_cells) <- "RNA"
+DefaultAssay(stromal_cells) <- "RNA"
+```
+
+
+## splitiing the object
+
+```{r}
+epi_cells_list <- SplitObject(epi_cells, split.by = "orig.ident")
+stromal_cells_list <- SplitObject(stromal_cells, split.by = "orig.ident")
+```
+
+
+
+
+
+### epithilial cells
+```{r}
+for (i in 1:length(epi_cells_list)) {
+    epi_cells_list[[i]] <- NormalizeData(epi_cells_list[[i]], verbose = FALSE)
+    epi_cells_list[[i]] <- FindVariableFeatures(epi_cells_list[[i]], selection.method = "vst", nfeatures = 2000,verbose = FALSE)
+}
+
+#hvgs_per_dataset <- lapply(epi_cells_list, function(x) { x@assays$RNA@var.features })
+#venn::venn(hvgs_per_dataset,opacity = .4,zcolor = scales::hue_pal()(3),cexsn = 1,cexil = 1,lwd=1,col="white",frame=F,borders = NA)
+```
+
+```{r}
+hvgs_per_dataset <- lapply(epi_cells_list, function(x) { x@assays$RNA@var.features })
+venn::venn(hvgs_per_dataset,opacity = .4,zcolor = scales::hue_pal()(3),cexsn = 1,cexil = 1,lwd=1,col="white",frame=F,borders = NA)
+```
+
+```{r}
+epi.anchors <- FindIntegrationAnchors(object.list = epi_cells_list, dims = 1:20)
+```
+## integrating the data
+```{r}
+epi.int <- IntegrateData(anchorset = epi.anchors, dims = 1:20, new.assay.name = "integrated")
+```
+```{r}
+names(epi.int@assays)
+```
+
+## Dimensionality reduction at integrated space
+
+```{r}
+epi.int <- ScaleData(epi.int, verbose = FALSE,assay = "integrated")
+epi.int <- RunPCA(epi.int, npcs = 20, verbose = FALSE, assay = "integrated",reduction.name = "PCA_on_integrated")
+epi.int <- RunUMAP(epi.int, reduction = "PCA_on_integrated", dims = 1:20,reduction.name = "UMAP_on_integrated")
+epi.int <- RunTSNE(epi.int, reduction = "PCA_on_integrated", dims = 1:30,reduction.name = "TSNE_on_integrated")
+
+```
+## plotting pca, tsne and umap for both non integrated and integrated data
+
+```{r}
+plot_grid(ncol = 3,
+  #DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident"),
+  #DimPlot(combined_data_filt_final, reduction = "TSNE_on_RNA", group.by = "orig.ident"),
+  #DimPlot(combined_data_filt_final, reduction = "UMAP_on_RNA", group.by = "orig.ident"),
+  
+  DimPlot(epi.int, reduction = "PCA_on_integrated", group.by = "orig.ident"),
+  DimPlot(epi.int, reduction = "TSNE_on_integrated", group.by = "orig.ident"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "orig.ident")
+)
+```
+
+```{r}
+DefaultAssay(epi.int) <- "RNA"
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Abca1","Cyp27a1","Cldn3","Lgr5","Epcam"),ncol = 2,order = T)
+```
+```{r}
+DefaultAssay(epi.int) <- "RNA"
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cldn3","Lgr5","Epcam"),ncol = 2,order = T,split.by = "old.ident")
+```
+
+
+
+## clustering the integrated dataset using grapgh based clustering
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+  library(pheatmap)
+  library(rafalib)
+})
+
+```
+
+```{r}
+epi.int <- FindNeighbors(epi.int,
+                         reduction = "PCA_on_integrated",
+                         dims = 1:20,
+                         k.param = 60,
+                         prune.SNN = 1/15)
+```
+```{r}
+names(epi.int@graphs)
+```
+##Building kNN / SNN graph
+```{r}
+pheatmap(epi.int@graphs$integrated_nn[1:200,1:200],
+         col=c("white","black"),border_color = "grey90",
+         legend = F,cluster_rows = F,cluster_cols = F,fontsize = 2)
+```
+## Clustering on graph
+
+```{r}
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = 0 , algorithm = 1)
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = .2 , algorithm = 1)
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = .3 , algorithm = 1)
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = .5 , algorithm = 1)
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = 1  , algorithm = 1)
+epi.int <- FindClusters(epi.int, graph.name = "integrated_snn", resolution = 2  , algorithm = 1)
+
+plot_grid(ncol = 2,
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0")+ggtitle("louvain_0"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2")+ggtitle("louvain_0.2"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3")+ggtitle("louvain_0.3"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5")+ggtitle("louvain_0.5"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.1")+ggtitle("louvain_1"),
+  DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.2")+ggtitle("louvain_2")
+)
+```
+```{r}
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5", label="T")+ggtitle("louvain_0.5")
+```
+
+
+```{r}
+pdf("umap_split_epithelial.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label="T",split.by = "orig.ident")+ggtitle("louvain_0.3")
+dev.off()
+```
+```{r}
+pdf("umap_epithelial.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label="T")+ggtitle("louvain_0.3")
+dev.off()
+```
+
+
+```{r}
+#DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label = "T")+ggtitle("louvain_0.3")
+```
+
+```{r}
+#FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cldn3","Lgr5","Vim","Acta2","Epcam"),ncol = 2,order = T,)
+```
+
+
+
+
+
+
+```{r}
+sessionInfo()
+```
+
+## Differential gene expression
+
+```{r}
+suppressPackageStartupMessages({
+    library(Seurat)
+    library(venn)
+    library(dplyr)
+    library(cowplot)
+    library(ggplot2)
+    library(pheatmap)
+    library(rafalib)
+})
+
+```
+
+```{r}
+print(epi.int@active.ident[1:10])
+```
+
+```{r}
+epi.int <- SetIdent(epi.int, value = "integrated_snn_res.0.3")
+
+```
+
+```{r}
+# Compute differentiall expression
+epi.int_markers_genes <- FindAllMarkers(epi.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+```{r}
+top25 <- epi.int_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+top25
+```
+
+
+```{r}
+pdf("Merkers_for_cluster.pdf")
+mypar(1, 6, mar = c(4, 6, 3, 1))
+for (i in unique(top25$cluster)) {
+    barplot(sort(setNames(top25$avg_logFC, top25$gene)[top25$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+dev.off()
+```
+
+```{r}
+pdf("Heatmap_for_cluster.pdf")
+#top10 <- epi.int_markers_genes %>% group_by(cluster) %>% top_n(-10, p_val_adj)
+
+#alldata <- ScaleData(epi.int, features = as.character(unique(top10$gene)), assay = "RNA")
+DoHeatmap(alldata, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", assay = "RNA") + theme(text = element_text(size = 6))
+dev.off()
+```
+
+```{r}
+#top5 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-5, p_val_adj)
+
+#alldata <- ScaleData(combined_data_filt_final.int, features = as.character(unique(top10$gene)), assay = "RNA")
+#DoHeatmap(alldata, features = as.character(unique(top5$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA") + theme(text = element_text(size = 5))
+```
+
+
+```{r}
+pdf("dotplot_split_epi.pdf")
+DotPlot(epi.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+```{r}
+DotPlot(epi.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(text = element_text(size = 6))
+
+```
+
+
+```{r}
+DotPlot(epi.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.3", assay = "RNA") + coord_flip()
+
+```
+
+
+```{r}
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" )
+```
+
+```{r}
+#DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0",split.by = "orig.ident" )
+```
+
+#### resolution 0.2
+
+
+```{r}
+#combined_data_filt_final.int <- SetIdent(combined_data_filt_final.int, value = "integrated_snn_res.0.2")
+
+```
+
+```{r}
+# Compute differentiall expression
+#combined_markers_genes <- FindAllMarkers(combined_data_filt_final.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE, max.cells.per.ident = 50, assay = "RNA")
+```
+
+```{r}
+#res_0.2_top25 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+res_0.2_top25
+```
+
+```{r}
+write.table(epi.int_markers_genes,"Epithileal_Marker_genes_each_cluster.tsv",sep = "\t")
+```
+
+
+
+
+```{r}
+pdf("featureplot_EPCAM_Lrrc19_int.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Epcam","Lrrc19" ),ncol = 1,order = T)
+dev.off()
+```
+
+```{r}
+FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lgals3","Sult1b1"),ncol = 2,order = T, split.by = "old.ident")
+```
+
+## differential expression between control vs depletion
+
+```{r}
+cell_selection <- subset(epi.int, cells = colnames(epi.int)[epi.int$integrated_snn_res.0 == 0])
+cell_selection <- SetIdent(cell_selection, value = "old.ident")
+
+```
+
+```{r}
+Epi_DGE__bulk_cell_selection <- FindAllMarkers(cell_selection, assay = "RNA")
+
+```
+
+```{r}
+write.table(Epi_DGE__bulk_cell_selection,"Epi_Diff_exp_gene_bulk_control_vs_depletion.tsv",sep = "\t")
+```
+
+
+
+```{r}
+top50 <- Epi_DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-50, p_val_adj)
+top50
+```
+
+
+```{r}
+pdf("Epi_DE_bulk.pdf")
+mypar(1, 2, mar = c(4, 6, 3, 1))
+for (i in unique(top40$cluster)) {
+    barplot(sort(setNames(top50$avg_logFC, top50$gene)[top50$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+dev.off()
+```
+
+```{r}
+#top50 <- DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-50, p_val_adj)
+
+cell_selection <- ScaleData(cell_selection, features = as.character(unique(top78$gene)), assay = "RNA")
+DoHeatmap(cell_selection, features = as.character(unique(top78$gene)), assay = "RNA") + theme(text = element_text(size = 10))
+```
+## charecterizing the cluster using literaure based genes doi:10.1038/nature24489
+
+```{r}
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" )
+```
+
+## enterocyte: cluster2
+```{r}
+pdf("featureplot_enterocyte_Alpi_markers.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Alpi","Fabp2" ),ncol = 2,order = T, split.by = "old.ident")
+dev.off()
+```
+
+## stem cells:cluster1
+
+```{r}
+pdf("featureplot_stem_cell_markers.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lgr5","Ascl2","Axin2","Olm4","Gkn3" ),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+#cluster1 is stem cells
+```{r}
+pdf("featureplot_stem_cell_markers_LGR5.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lgr5" ),ncol = 6,order = T)
+dev.off()
+```
+# entero endocrine: cluster 5
+
+```{r}
+pdf("featureplot_enteroendocrine_cell_markers.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Chga","Chgb","Tacl","Tph1" ),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+## Goblet cells:cluster3
+
+
+```{r}
+pdf("featureplot_goblet_cell_markers.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Muc2","Clca3","Tff3","Agr2"),ncol = 2,order = T, split.by = "old.ident")
+dev.off()
+```
+
+
+##cluster2 and cluster 0 are : enterocyte and cluster 0 are also enterocytes
+## distal and proximaL enterocyte 
+
+```{r}
+pdf("featureplot_enterocyte_cell_markers.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cbr1","Mep1a","Clec2h","Lrrc19","Batf2"),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+```{r}
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lrrc19"),ncol = 4,order = T, split.by = "old.ident")
+```
+
+```{r}
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Tmem37","Gpr160"),ncol = 4,order = T, split.by = "old.ident")
+```
+
+```{r}
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Mxd3","Foxm1","Batf2"),ncol = 4,order = T, split.by = "old.ident")
+```
+
+
+
+```{r}
+levels(epi.int)
+```
+
+```{r}
+new.cluster.ids <- c("enterocytes1","stem","enterocyte2","goblet cell","enterocytes+stromal?","enteroendocrine")
+names(new.cluster.ids) <- levels(epi.int)
+epi.int <- RenameIdents(epi.int, new.cluster.ids)
+#DimPlot(epi.int, reduction = "UMAP_on_integrated", label = TRUE, pt.size = 0.5) + NoLegend()
+```
+```{r}
+pdf("umap_cluster_charecterization.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated", label = TRUE, pt.size = 0.5) + NoLegend()
+dev.off()
+```
+
+```{r}
+pdf("umap_cluster_charecterization_split.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated", label = TRUE, pt.size = 0.5,split.by = "orig.ident") + NoLegend()
+dev.off()
+```
+
+## Col3a1
+Cxcl12
+Tgfbr3
+Col1a2
+Serping1
+Col6a1
+Serpina3n
+Col1a1
+Icam1
+Apoe
+Saa1
+Cxcl1
+Retnlb
+Fabp2
+Hmgcs2
+```{r}
+pdf("Markers_for_cluster4_1.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cxcl12","Tgfbr3","Col1a2","Serping1","Col6a1","Serpina3n"),ncol = 3,order = T)
+dev.off()
+```
+
+```{r}
+#FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Serping1","Col6a1","Serpina3n"),ncol = 4,order = T, split.by = "old.ident")
+```
+
+```{r}
+pdf("Markers_for_cluster4_2.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Col1a1","Icam1","Apoe","Epcam","Col3a1"),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+
+```{r}
+pdf("Markers_for_cluster4_3.pdf")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Saa1","Cxcl1","Retnlb","Fabp2","Hmgcs2"),ncol = 3,order = T, split.by = "old.ident")
+dev.off()
+```
+
+```{r}
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" )
+```
+
+```{r}
+saveRDS(epi.int, file = "epi.int.RDS") 
+```
+
+
+
+```{r}
+pdf("spatial_transcriptomics.pdf")
+#FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Epcam","Lrrc19"),ncol = 4,order = T, split.by = "old.ident")
+FeaturePlot(epi.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Igfbp5","Col1a2","Col1a1", "Igfb4","Apoe","C4b","Postn","Mgp","Col4a1","Fcer1g","Col4a2","Ptma","Lrp1","Cxcl5"),ncol = 3,order = T)
+dev.off()
+```
+
+
+Stem cells: Lgr5, Olfm4, Ascl2, Axin2
+Goblet cells: Muc2, Agr2, Klf4
+Enterocytes: Alpi, Mep1a
+Enteroendocrine: Chga, Chgb, Tac1
+Tuft cells: Dclk1, Il25
+EMT: Sparc, Vim, Foxf1, Tgfbr2
+
+#stem cell
+```{r}
+pdf("stem_cell_markers_combined_exp.pdf")
+stem_markers <- c("Lgr5","Olfm4", "Ascl2", "Axin2")
+stem_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][stem_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = stem_markers_percent , col.name = "stem_markers_percent")
+FeaturePlot(object = epi.int, features = "stem_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+```{r}
+pdf("goblet_cell_markers_combined_exp.pdf")
+goblet_markers <- c("Muc2", "Agr2", "Klf4")
+goblet_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][goblet_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = goblet_markers_percent , col.name = "goblet_markers_percent")
+FeaturePlot(object = epi.int, features = "goblet_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+```{r}
+pdf("enterocyte_cell_markers_combined_exp.pdf")
+enterocyte_markers <- c("Alpi", "Mep1a")
+enterocyte_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][enterocyte_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = enterocyte_markers_percent , col.name = "enterocyte_markers_percent")
+FeaturePlot(object = epi.int, features = "enterocy_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+```{r}
+pdf("enteroendocrine_cell_markers_combined_exp.pdf")
+enteroendocrine_markers <- c("Chga", "Chgb", "Tac1")
+enteroendocrine_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][enteroendocrine_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = enteroendocrine_markers_percent , col.name = "enteroendocrine_markers_percent")
+FeaturePlot(object = epi.int, features = "enteroendocrine_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+```{r}
+pdf("Tuft_cell_markers_combined_exp.pdf")
+Tuft_markers <- c("Dclk1", "Il25")
+Tuft_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][Tuft_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = Tuft_markers_percent , col.name = "Tuft_markers_percent")
+FeaturePlot(object = epi.int, features = "Tuft_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+```{r}
+pdf("EMT_cell_markers_combined_exp.pdf")
+EMT_markers <- c("Sparc", "Vim", "Foxf1", "Tgfbr2")
+EMT_markers_percent <- Matrix::colSums(epi.int@assays[["RNA"]][EMT_markers, ])/Matrix::colSums(epi.int@assays[["RNA"]])
+epi.int <- AddMetaData(object = epi.int, metadata = EMT_markers_percent , col.name = "EMT_markers_percent")
+FeaturePlot(object = epi.int, features = "EMT_markers_percent", cols = c("grey", "blue"), reduction = "UMAP_on_integrated",pt.size = 1,sort.cell=TRUE)
+dev.off()
+```
+
+
+```{r}
+pdf("basic_statistics_on_cluster.pdf")
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+cowplot::plot_grid(ncol = 1,
+VlnPlot(epi.int, features = feats, pt.size = 0.1,ncol = 4) + NoLegend())
+dev.off()
+```
+```{r}
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+marrow <- RunPCA(epi.int, features = c(s.genes, g2m.genes))
+DimPlot(marrow)
+```
+```{r}
+RidgePlot(epi.int, features = c("Pcna", "Top2a", "Mcm6", "Mki67"), ncol = 2)
+```
+
+
+```{r}
+pdf("dotplot_split_epi_proliferation_markers_s.genes.pdf")
+DotPlot(epi.int, features = c("Mcm5","Pcna","Tyms","Fen1","Mcm2","Mcm4","Mcm6","Cdca7","Prim1","Mlf1p","Gmnn","Cdc45","Cdc6","Exo1","Ccne2","Dscc1","Pold3","Msh2","Atad2","Clspn"), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+```{r}
+pdf("dotplot_split_epi_proliferation_markers_G2M.genes.pdf")
+DotPlot(epi.int, features = c("Hmgb2","Mki67","Kif2c","Cdk1","Tmpo","Anp32e","Tubb4b","Ckap5","Ubec2","Tacc3","Cenpe","Cdca2","Ctcf","Cdca8","Top2a","Cdca3","Ect2","Ndc80","Hn1","Cks2","Cdc20","Nuf2","Cenpa","Cdc25c"), group.by = "integrated_snn_res.0.3", dot.scale = 2,assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(axis.text.x = element_text(size = 7)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 7)) 
+dev.off()
+```
+
+## differential expression between the condition in each cluster
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+enterocytes1 <-subset(epi.int, idents = c("enterocytes1"))
+enterocytes1 <- SetIdent(enterocytes1, value = "orig.ident")
+# Compute differentiall expression
+DGE_enterocytes1 <- FindAllMarkers(enterocytes1, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+```{r}
+write.table(DGE_enterocytes1,"DGE_enterocytes1.tsv",sep="\t")
+```
+
+
+```{r}
+#top18_DGE_enterocytes1 <- DGE_enterocytes1 %>% group_by(cluster) %>% top_n(18, p_val_adj)
+pdf("violinplot_enterocytes1_DE.pdf")
+VlnPlot(enterocytes1, features = as.character(unique(top18_DGE_enterocytes1$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+stem <-subset(epi.int, idents = c("stem"))
+stem <- SetIdent(stem, value = "orig.ident")
+# Compute differentiall expression
+DGE_stem <- FindAllMarkers(stem, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+
+```{r}
+write.table(DGE_stem,"DGE_stem.tsv",sep="\t")
+```
+
+
+
+```{r}
+top_stem <- DGE_stem %>% group_by(cluster) %>% top_n(6, p_val_adj)
+pdf("violinplot_stem_DE.pdf")
+VlnPlot(stem, features = as.character(unique(top_stem$gene)), ncol = 3, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+enterocyte2 <-subset(epi.int, idents = c("enterocyte2"))
+enterocyte2 <- SetIdent(enterocyte2, value = "orig.ident")
+# Compute differentiall expression
+DGE_enterocyte2 <- FindAllMarkers(enterocyte2, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+
+```{r}
+write.table(DGE_enterocyte2,"DGE_enterocytes2.tsv",sep="\t")
+```
+
+
+
+```{r}
+top_DGE_enterocyte2 <- DGE_enterocyte2 %>% group_by(cluster) %>% top_n(16, p_val_adj)
+pdf("violinplot_enterocyte2_DE.pdf")
+VlnPlot(enterocyte2, features = as.character(unique(top_DGE_enterocyte2$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+goblet <-subset(epi.int, idents = c("goblet cell"))
+goblet <- SetIdent(goblet, value = "orig.ident")
+# Compute differentiall expression
+DGE_goblet <- FindAllMarkers(goblet, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+```{r}
+write.table(DGE_goblet,"DGE_goblet.tsv",sep="\t")
+```
+
+
+```{r}
+top_DGE_goblet <- DGE_goblet %>% group_by(cluster) %>% top_n(10, p_val_adj)
+pdf("violinplot_goblet_DE.pdf")
+VlnPlot(goblet, features = as.character(unique(top_DGE_goblet$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+enterocytes_stromal <-subset(epi.int, idents = c("enterocytes+stromal?"))
+enterocytes_stromal <- SetIdent(enterocytes_stromal, value = "orig.ident")
+# Compute differentiall expression
+DGE_enterocytes_stromal <- FindAllMarkers(enterocytes_stromal, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+```{r}
+write.table(DGE_enterocytes_stromal,"DGE_enterocytes_stromal.tsv",sep="\t")
+```
+
+
+```{r}
+top_DGE_enterocytes_stromal <- DGE_enterocytes_stromal %>% group_by(cluster) %>% top_n(10, p_val)
+pdf("violinplot_DGE_enterocytes_stromal_DE.pdf")
+VlnPlot(enterocytes_stromal, features = as.character(unique(top_DGE_enterocytes_stromal$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+```{r}
+#cell_selection <- subset(epi.int, cells = colnames(alldata)[alldata$kmeans_5 == 4])
+enteroendocrine <-subset(epi.int, idents = c("enteroendocrine"))
+enteroendocrine <- SetIdent(enteroendocrine, value = "orig.ident")
+# Compute differentiall expression
+DGE_enteroendocrine <- FindAllMarkers(enteroendocrine, logfc.threshold = 0.2, test.use = "wilcox",  only.pos = TRUE, max.cells.per.ident = 200, assay = "RNA")
+```
+
+```{r}
+write.table(DGE_enteroendocrine,"DGE_enteroendocrine.tsv",sep="\t")
+```
+
+```{r}
+top_DGE_enteroendocrine <- DGE_enteroendocrine %>% group_by(cluster) %>% top_n(2, p_val)
+pdf("violinplot_DGE_enteroendocrine_DE.pdf")
+VlnPlot(enteroendocrine, features = as.character(unique(top_DGE_enteroendocrine$gene)), ncol = 5, group.by = "orig.ident", assay = "RNA",pt.size = 0) + theme(axis.text.x = element_text(size = 4)) + theme(axis.text.x=element_text(angle = 90)) + theme(axis.text.y  = element_text(size = 4))
+dev.off()
+```
+
+counting the number of cells
+```{r}
+freq <- table(epi.int@active.ident, epi.int@meta.data$orig.ident)
+write.table(freq,'epithilial_freq.tsv', sep = "\t")
+```
+
+```{r, useDingbats=FALSE}
+pdf("epithilium_umap_split.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3",split.by = "orig.ident" )
+dev.off()
+```
+
+```{r, useDingbats=FALSE}
+pdf("epithilium_umap_split2.pdf")
+DimPlot(epi.int, reduction = "UMAP_on_integrated",split.by = "orig.ident" )
+dev.off()
+```
+
+```{r}
+plots <- VlnPlot(epi.int, features = c("Alpi", "Mep1a", "Fabp1", "Apoa1", "Apoa4", "Elf3", "Lrrc19"), split.by = "orig.ident", group.by = "integrated_snn_res.0.3", 
+    pt.size = 0, combine = FALSE)
+wrap_plots(plots = plots, ncol = 3)
+```
+
+```{r}
+pdf("epithilium_violinplot.pdf")
+plots <- VlnPlot(epi.int, features = c("Alpi", "Mep1a", "Fabp1", "Apoa1", "Apoa4", "Elf3", "Lrrc19"), split.by = "orig.ident",pt.size = 0, combine = FALSE) 
+wrap_plots(plots = plots, ncol = 2)
+dev.off()
+```
+```{r}
+Idents(epi.int) <- "integrated_snn_res.0.3"
+```
+
+
+```{r}
+epi.int@meta.data$celltype.stim <- paste0(epi.int@active.ident, "_", 
+    epi.int@meta.data$orig.ident)
+epi.int[["celltype"]] <- Idents(object = epi.int)
+Idents(object = epi.int) <- 'celltype.stim'
+```
+
+
+

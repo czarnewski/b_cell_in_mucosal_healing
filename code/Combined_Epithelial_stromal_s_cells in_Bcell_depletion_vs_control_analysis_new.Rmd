@@ -1,0 +1,666 @@
+---
+title: "B cell depletion vs control condition: single cell analysis on heterogenous cell population in the intestine, 11th march"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*. 
+
+```{r}
+suppressPackageStartupMessages({
+library(Seurat)
+library(dplyr)
+library(venn)
+library(cowplot)
+})
+```
+## loading the data
+```{r loading_data, cache=TRUE, message=FALSE}
+
+B_cntrl.data <- Read10X(data.dir = "/Users/kumtri/Documents/New_SCRNA_B_dep/B_control/filtered_feature_bc_matrix")
+
+B_dep.data <- Read10X(data.dir = "/Users/kumtri/Documents/New_SCRNA_B_dep/B_depletion/filtered_feature_bc_matrix")
+```
+##  creating seurat object and merging the data
+
+```{r seurat object}
+B_cntrl.data_seurat <- CreateSeuratObject(B_cntrl.data, project = "control")
+B_dep.data_seurat <- CreateSeuratObject(B_dep.data, project = "depletion")
+
+# Merge datasets into one single seurat object
+combined_data <- merge(B_cntrl.data_seurat, c(B_dep.data_seurat), add.cell.ids=c("control","depletion"))
+```
+```{r}
+as.data.frame(combined_data@assays$RNA@counts[1:10,1:2])
+head(combined_data@meta.data,10)
+```
+## calculate QC
+```{r}
+mito_genes <- rownames(combined_data)[grep("^mt-",rownames(combined_data))]
+ribo_genes <- rownames(combined_data)[grep("^Rp[sl]",rownames(combined_data))]
+combined_data <- PercentageFeatureSet(combined_data, "^mt-", col.name = "percent_mito")
+combined_data <- PercentageFeatureSet(combined_data, "^Rp[sl]", col.name = "percent_ribo")
+```
+
+##plot QC
+
+```{r}
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+VlnPlot(combined_data, group.by= "orig.ident", features = feats, pt.size = 0.1,ncol = 4) + NoLegend()
+```
+```{r}
+dim(combined_data)
+```
+
+
+```{r}
+cowplot::plot_grid(ncol = 2,
+  FeatureScatter(combined_data, "nCount_RNA"  , "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_mito", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_ribo", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data, "percent_ribo", "percent_mito", group.by = "orig.ident", pt.size = .5)
+)
+
+```
+
+```{r}
+library("biomaRt")
+listMarts()
+```
+
+
+#Filter out mitocondrial genes and  "long non-coding RNA" from the expression matrix
+```{r, echo=TRUE, include=T, results='hold', fig.height = 1, fig.width = 3,tidy=T,fig.align='center',fig.show='hold'}
+
+mouse = useMart("ensembl", dataset = "mmusculus_gene_ensembl")
+
+`%!in%` = Negate(`%in%`)
+
+annot <- getBM(c("ensembl_transcript_id","mgi_symbol","gene_biotype","transcript_biotype"), mart=mouse)
+gene_biotype <- sort(table(annot[annot[,"mgi_symbol"] %in% rownames(combined_data),"gene_biotype"])/dim(combined_data)[1]*100,decreasing = T)
+
+#select <- annot[(annot[,"gene_biotype"] %in% c("lncRNA")) & (annot[,"transcript_biotype"] %in% c("lincRNA","protein_coding")),]
+select <- annot[(annot[,"gene_biotype"] %!in% c("lncRNA")) & (annot[,"transcript_biotype"] %!in% c("lncRNA")),]
+combined_data_filt <- combined_data[select[select[,2] %in% rownames(combined_data),2],]
+gene_biotype_filtered <- sort(table(select[select[,"mgi_symbol"] %in% rownames(combined_data_filt),"gene_biotype"])/dim(combined_data_filt)[1]*100,decreasing = T)
+
+mypar(1,2)
+pie(gene_biotype, clockwise = T, labels = c("protein_coding"), col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype,0)) + 1) )[ round(gene_biotype,0) + 1 ])
+title("before filtering")
+pie(gene_biotype_filtered,clockwise = T,labels = c("protein_coding"),col = colorRampPalette(c("grey95","firebrick"))( (max(round(gene_biotype_filtered,0)) + 1) )[ round(gene_biotype_filtered,0) + 1 ])
+title("after filtering")
+
+#annot2 <- getBM(c("ensembl_transcript_id", "mgi_symbol"), mart=mouse)
+#select2 <- annot2[annot2[,1] %in% rownames(RawData),]
+#RawData <- RawData[c(select2[,1]),]
+#RawData <- rowsum(RawData,select2[,2])
+
+#RawData <- RawData[rownames(RawData) != "",]
+```
+
+
+
+
+
+
+## Detection based filtering
+
+```{r}
+selected_c <- WhichCells(combined_data_filt, expression = nFeature_RNA > 200)
+selected_f <- rownames(combined_data_filt)[ Matrix::rowSums(combined_data_filt) > 3]
+
+combined_data_filt_final <- subset(combined_data_filt, features=selected_f, cells=selected_c)
+dim(combined_data_filt_final)
+dim(combined_data_filt)
+dim(combined_data)
+```
+
+```{r}
+#Compute the relative expression of each gene per cell
+rel_expression <- t( t(combined_data@assays$RNA@counts) / Matrix::colSums(combined_data@assays$RNA@counts)) * 100
+most_expressed <- sort(Matrix::rowSums( rel_expression ),T)[20:1] / ncol(combined_data)
+
+par(mfrow=c(1,2),mar=c(4,6,1,1))
+boxplot( as.matrix(t(rel_expression[names(most_expressed),])),cex=.1, las=1, xlab="% total count per cell",col=scales::hue_pal()(20)[20:1],horizontal=TRUE)
+```
+## Mitochondrial and ribosomal gene filtering
+
+```{r}
+selected_mito <- WhichCells(combined_data_filt_final, expression = percent_mito < 20)
+selected_ribo <- WhichCells(combined_data_filt_final, expression = percent_ribo > 5)
+
+combined_data_filt_final <- subset(combined_data_filt_final, cells = selected_mito)
+combined_data_filt_final <- subset(combined_data_filt_final, cells = selected_ribo)
+dim(combined_data_filt_final)
+
+```
+
+```{r}
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+cowplot::plot_grid(ncol = 1,
+VlnPlot(combined_data_filt_final, group.by= "orig.ident", features = feats, pt.size = 0.1,ncol = 4) + NoLegend())
+```
+## checking the quality after filtering
+
+```{r}
+cowplot::plot_grid(ncol = 2,
+  FeatureScatter(combined_data_filt_final, "nCount_RNA"  , "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_mito", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_ribo", "nFeature_RNA", group.by = "orig.ident", pt.size = .5),
+  FeatureScatter(combined_data_filt_final, "percent_ribo", "percent_mito", group.by = "orig.ident", pt.size = .5)
+)
+
+```
+## cell cycle score
+
+```{r}
+s.genes <- cc.genes$s.genes
+g2m.genes <- cc.genes$g2m.genes
+combined_data_filt_final <- CellCycleScoring(object = combined_data_filt_final, g2m.features = cc.genes$g2m.genes,s.features = cc.genes$s.genes, set.ident = TRUE)
+#marrow <- CellCycleScoring(marrow, s.features = s.genes, g2m.features = g2m.genes, set.ident = TRUE)
+VlnPlot(combined_data_filt_final, features = c("S.Score","G2M.Score"), group.by= "orig.ident",ncol = 4, pt.size = .1)
+
+```
+```{r}
+
+feats <- c("nFeature_RNA","nCount_RNA","percent_mito","percent_ribo")
+cowplot::plot_grid(ncol = 1,
+VlnPlot(combined_data_filt_final, group.by= "orig.ident", features = feats, pt.size = 0.1,ncol = 4) + NoLegend())
+dim(combined_data_filt_final)
+
+```
+```{r}
+#selected_mito <- WhichCells(B.combined_data_filt_final, expression = percent_mito < 5)
+#selected_ribo <- WhichCells(B.combined_data_filt_final, expression = percent_ribo > 5)
+
+#B.combined_data_filt_final <- subset(B.combined_data_filt_final, cells = selected_mito)
+#B.combined_data_filt_final <- subset(B.combined_data_filt_final, cells = selected_ribo)
+dim(combined_data_filt_final)
+```
+
+```{r}
+
+#selected_c <- WhichCells(B.combined_data_filt_final, expression = nFeature_RNA > 200)
+#selected_f <- rownames(B.combined_data_filt_final)[ Matrix::rowSums(B.combined_data_filt_final) > 0]
+
+#B.combined_data_filt_final <- subset(B.combined_data_filt_final, features=selected_f, cells=selected_c)
+#dim(B.combined_data_filt_final)
+```
+
+## complete the initalization steps
+
+```{r}
+combined_data_filt_final <- NormalizeData(combined_data_filt_final)
+combined_data_filt_final <- FindVariableFeatures(combined_data_filt_final, selection.method = "vst")
+combined_data_filt_final <- ScaleData(combined_data_filt_final, features = rownames(combined_data_filt_final))
+```
+
+
+
+
+## PCA on variable features
+
+```{r}
+combined_data_filt_final <- RunPCA(combined_data_filt_final, features = VariableFeatures(combined_data_filt_final), ndims.print = 1:10, nfeatures.print = 10)
+```
+
+```{r}
+DimHeatmap(combined_data_filt_final, dims = c(1:10))
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+  library(scran)
+})
+
+```
+
+## Feature selection
+
+```{r}
+top50 <- head(VariableFeatures(combined_data_filt_final), 50)
+
+LabelPoints(plot = VariableFeaturePlot(combined_data_filt_final), points = top50, repel = TRUE)
+```
+```{r}
+combined_data_filt_final <- ScaleData(combined_data_filt_final, vars.to.regress = "percent_mito", assay = "RNA")
+```
+
+## PCA analysis
+```{r}
+combined_data_filt_final <- RunPCA(combined_data_filt_final, npcs = 50, reduction.name = "PCA_on_RNA", assay = "RNA",verbose = F)
+```
+```{r}
+plot_grid(ncol = 2,
+  DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident",dims = 1:2),
+  DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident",dims = 3:4),
+  DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident",dims = 5:6) )
+```
+
+```{r}
+VizDimLoadings(combined_data_filt_final, dims = 1:5, reduction = "PCA_on_RNA",ncol = 5,balanced = T )
+```
+
+```{r}
+ElbowPlot(combined_data_filt_final, reduction = "PCA_on_RNA",ndims = 50)
+```
+```{r}
+combined_data_filt_final <- RunTSNE(combined_data_filt_final, reduction = "PCA_on_RNA", dims = 1:30, reduction.name = "TSNE_on_RNA",
+                   perplexity=30,
+                   max_iter=1000,
+                   theta=0.5,
+                   eta=200,
+                   num_threads=0 )
+```
+
+```{r}
+plot_grid(ncol = 2,DimPlot(combined_data_filt_final, reduction = "TSNE_on_RNA", group.by = "orig.ident"))
+```
+
+##UMAP
+
+
+```{r}
+
+combined_data_filt_final <- RunUMAP(combined_data_filt_final, reduction = "PCA_on_RNA", dims = 1:30,reduction.name = "UMAP_on_RNA",
+                   n.components=2,
+                   n.neighbors=30,
+                   n.epochs=200,
+                   min.dist=0.3,
+                   learning.rate=1,
+                   spread=1 )
+
+```
+
+
+```{r}
+combined_data_filt_final <- RunUMAP(combined_data_filt_final, reduction.name = "UMAP10_on_RNA",
+                   reduction = "PCA_on_RNA", 
+                   dims = 1:30,
+                   n.components=10,
+                   n.neighbors=30,
+                   n.epochs=200,
+                   min.dist=0.3,
+                   learning.rate=1,
+                   spread=1 )
+```
+```{r}
+plot_grid(ncol = 2,
+  DimPlot(combined_data_filt_final, reduction = "UMAP_on_RNA", group.by = "orig.ident")+ ggplot2::ggtitle(label ="UMAP_on_RNA"),
+  DimPlot(combined_data_filt_final, reduction = "UMAP10_on_RNA", group.by = "orig.ident",dims = 1:2)+ ggplot2::ggtitle(label ="UMAP10_on_RNA"),
+  DimPlot(combined_data_filt_final, reduction = "UMAP10_on_RNA", group.by = "orig.ident",dims = 3:4)+ ggplot2::ggtitle(label ="UMAP10_on_RNA")
+)
+```
+## PCA, TSNE and UMAP
+```{r}
+plot_grid(ncol = 2,
+  DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final, reduction = "TSNE_on_RNA", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final, reduction = "UMAP_on_RNA", group.by = "orig.ident")
+)
+```
+
+```{r}
+myfeatures <- c("Abca1","Cyp27a1","Cldn3")
+FeaturePlot(combined_data_filt_final, reduction = "UMAP_on_RNA",dims = 1:2,
+            features = myfeatures,ncol = 3,order = T,split.by = "orig.ident")
+```
+```{r}
+saveRDS(combined_data_filt_final,"combined_data_filt_final.rds")
+```
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+})
+```
+
+```{r}
+print(names(combined_data_filt_final@reductions))
+```
+
+## integrating the data
+
+```{r}
+combined_data_filt_final_list <- SplitObject(combined_data_filt_final, split.by = "orig.ident")
+```
+
+```{r}
+for (i in 1:length(combined_data_filt_final_list)) {
+    combined_data_filt_final_list[[i]] <- NormalizeData(combined_data_filt_final_list[[i]], verbose = FALSE)
+    combined_data_filt_final_list[[i]] <- FindVariableFeatures(combined_data_filt_final_list[[i]], selection.method = "vst", nfeatures = 2000,verbose = FALSE)
+}
+
+hvgs_per_dataset <- lapply(combined_data_filt_final_list, function(x) { x@assays$RNA@var.features })
+venn::venn(hvgs_per_dataset,opacity = .4,zcolor = scales::hue_pal()(3),cexsn = 1,cexil = 1,lwd=1,col="white",frame=F,borders = NA)
+```
+
+```{r}
+combined_data_filt_final_list.anchors <- FindIntegrationAnchors(object.list = combined_data_filt_final_list, dims = 1:20)
+```
+## integrating the data
+```{r}
+combined_data_filt_final.int <- IntegrateData(anchorset = combined_data_filt_final_list.anchors, dims = 1:20, new.assay.name = "integrated")
+```
+```{r}
+names(combined_data_filt_final.int@assays)
+```
+
+## Dimensionality reduction at integrated space
+
+```{r}
+combined_data_filt_final.int <- ScaleData(combined_data_filt_final.int, verbose = FALSE,assay = "integrated")
+combined_data_filt_final.int <- RunPCA(combined_data_filt_final.int, npcs = 20, verbose = FALSE, assay = "integrated",reduction.name = "PCA_on_integrated")
+combined_data_filt_final.int <- RunUMAP(combined_data_filt_final.int, reduction = "PCA_on_integrated", dims = 1:20,reduction.name = "UMAP_on_integrated")
+combined_data_filt_final.int <- RunTSNE(combined_data_filt_final.int, reduction = "PCA_on_integrated", dims = 1:30,reduction.name = "TSNE_on_integrated")
+
+```
+## plotting pca, tsne and umap for both non integrated and integrated data
+
+```{r}
+plot_grid(ncol = 3,
+  DimPlot(combined_data_filt_final, reduction = "PCA_on_RNA", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final, reduction = "TSNE_on_RNA", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final, reduction = "UMAP_on_RNA", group.by = "orig.ident"),
+  
+  DimPlot(combined_data_filt_final.int, reduction = "PCA_on_integrated", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final.int, reduction = "TSNE_on_integrated", group.by = "orig.ident"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "orig.ident")
+)
+```
+
+```{r}
+FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Abca1","Cyp27a1","Cldn3","Lgr5","Vim","Acta","Epcam","Pecam","Thy1"),ncol = 2,order = T)
+```
+## clustering the integrated dataset using grapgh based clustering
+
+```{r}
+suppressPackageStartupMessages({
+  library(Seurat)
+  library(cowplot)
+  library(ggplot2)
+  library(pheatmap)
+  library(rafalib)
+})
+
+```
+
+```{r}
+combined_data_filt_final.int <- FindNeighbors(combined_data_filt_final.int,
+                         reduction = "PCA_on_integrated",
+                         dims = 1:20,
+                         k.param = 60,
+                         prune.SNN = 1/15)
+```
+```{r}
+names(combined_data_filt_final.int@graphs)
+```
+##Building kNN / SNN graph
+```{r}
+pheatmap(combined_data_filt_final.int@graphs$integrated_nn[1:200,1:200],
+         col=c("white","black"),border_color = "grey90",
+         legend = F,cluster_rows = F,cluster_cols = F,fontsize = 2)
+```
+## Clustering on graph
+
+```{r}
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = 0 , algorithm = 1)
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = .2 , algorithm = 1)
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = .3 , algorithm = 1)
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = .5 , algorithm = 1)
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = 1  , algorithm = 1)
+combined_data_filt_final.int <- FindClusters(combined_data_filt_final.int, graph.name = "integrated_snn", resolution = 2  , algorithm = 1)
+
+plot_grid(ncol = 2,
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0")+ggtitle("louvain_0"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2")+ggtitle("louvain_0.2"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3")+ggtitle("louvain_0.3"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5")+ggtitle("louvain_0.5"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.1")+ggtitle("louvain_1"),
+  DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.2")+ggtitle("louvain_2")
+)
+```
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2", label="T")+ggtitle("louvain_0.2")
+```
+
+
+
+
+
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5", label="T")+ggtitle("louvain_0.5")
+```
+
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.3", label = "T")+ggtitle("louvain_0.3")
+```
+
+```{r}
+FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Cldn3","Lgr5","Vim","Acta2","Epcam"),ncol = 2,order = T)
+```
+
+
+
+
+
+
+```{r}
+sessionInfo()
+```
+
+## Differential gene expression
+
+```{r}
+suppressPackageStartupMessages({
+    library(Seurat)
+    library(venn)
+    library(dplyr)
+    library(cowplot)
+    library(ggplot2)
+    library(pheatmap)
+    library(rafalib)
+})
+
+```
+
+```{r}
+print(combined_data_filt_final.int@active.ident[1:10])
+```
+
+```{r}
+combined_data_filt_final.int <- SetIdent(combined_data_filt_final.int, value = "integrated_snn_res.0.5")
+
+```
+
+```{r}
+# Compute differentiall expression
+combined_markers_genes <- FindAllMarkers(combined_data_filt_final.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE, max.cells.per.ident = 50, assay = "RNA")
+```
+
+```{r}
+top25 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+top25
+```
+
+
+```{r}
+mypar(1, 7, mar = c(4, 6, 3, 1))
+for (i in unique(top25$cluster)) {
+    barplot(sort(setNames(top25$avg_logFC, top25$gene)[top25$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+```
+
+```{r}
+top10 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-10, p_val_adj)
+
+#alldata <- ScaleData(combined_data_filt_final.int, features = as.character(unique(top10$gene)), assay = "RNA")
+DoHeatmap(alldata, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA") + theme(text = element_text(size = 6))
+```
+
+```{r}
+top5 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-5, p_val_adj)
+
+#alldata <- ScaleData(combined_data_filt_final.int, features = as.character(unique(top10$gene)), assay = "RNA")
+DoHeatmap(alldata, features = as.character(unique(top5$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA") + theme(text = element_text(size = 5))
+```
+
+
+```{r}
+DotPlot(combined_data_filt_final.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA",split.by = "orig.ident", cols = c("red","blue")) + coord_flip() +theme(text = element_text(size = 6))
+
+```
+
+
+```{r}
+DotPlot(combined_data_filt_final.int, features = as.character(unique(top5$gene)), group.by = "integrated_snn_res.0.5", assay = "RNA") + coord_flip()
+
+```
+
+
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.5",split.by = "orig.ident" )
+```
+
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0",split.by = "orig.ident" )
+```
+
+#### resolution 0.2
+
+
+```{r}
+combined_data_filt_final.int <- SetIdent(combined_data_filt_final.int, value = "integrated_snn_res.0.2")
+
+```
+
+```{r}
+# Compute differentiall expression
+combined_markers_genes <- FindAllMarkers(combined_data_filt_final.int, logfc.threshold = 0.2, test.use = "wilcox", min.pct = 0.1, min.diff.pct = 0.2, only.pos = TRUE,  assay = "RNA")
+```
+
+```{r}
+res_0.2_top25 <- combined_markers_genes %>% group_by(cluster) %>% top_n(-25, p_val_adj)
+res_0.2_top25
+```
+
+```{r}
+write.table(combined_markers_genes,"Marker_genes_each_cluster_new.tsv",sep = "\t")
+```
+
+
+```{r}
+pdf("markers_each_cluster_barplot_new.pdf")
+mypar(1, 3, mar = c(4, 6, 3, 1))
+for (i in unique(res_0.2_top25$cluster)) {
+    barplot(sort(setNames(res_0.2_top25$avg_logFC, res_0.2_top25$gene)[res_0.2_top25$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+dev.off()
+```
+```{r}
+pdf("heatmaptop10.pdf")
+
+top10 <- combined_markers_genes %>% group_by(cluster) %>% top_n(10, avg_logFC)
+
+alldata0.2 <- ScaleData(combined_data_filt_final.int, features = as.character(unique(top10$gene)), assay = "RNA")
+DoHeatmap(alldata0.2, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.2", assay = "RNA") + theme(text = element_text(size = 6))
+dev.off()
+```
+
+
+
+```{r}
+pdf("dotplot_split.pdf")
+DotPlot(combined_data_filt_final.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.2", assay = "RNA",split.by = "orig.ident", cols = c("red","blue"),) + coord_flip() +theme(text = element_text(size = 4)) +theme(axis.text.x = element_text(angle = 40, hjust = 1)) + theme(axis.text.y = element_text(size = 6))
+dev.off()
+```
+```{r}
+pdf("dotplot_top_10_marker.pdf")
+DotPlot(combined_data_filt_final.int, features = as.character(unique(top10$gene)), group.by = "integrated_snn_res.0.2", assay = "RNA") + coord_flip() +theme(text = element_text(size = 10)) +theme(axis.text.x = element_text(angle = 40, hjust = 1)) + theme(axis.text.y = element_text(size = 6))
+dev.off()
+```
+
+
+
+```{r}
+pdf("stromal+epithelial_integrated_umap.pdf")
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2",label="T" )
+dev.off()
+```
+
+```{r}
+DimPlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated", group.by = "integrated_snn_res.0.2",label="T" )
+```
+
+```{r}
+
+```
+
+
+```{r}
+pdf("featureplot_integrated_split.pdf")
+FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Vim","Acta2","Epcam","Il6" ),ncol = 2,order = T, split.by = "old.ident")
+dev.off()
+```
+
+```{r}
+FeaturePlot(combined_data_filt_final.int, reduction = "UMAP_on_integrated",dims = 1:2,features = c("Lgals3","Sult1b1"),ncol = 2,order = T, split.by = "old.ident")
+```
+
+## differential expression between control vs depletion
+
+```{r}
+cell_selection <- subset(combined_data_filt_final.int, cells = colnames(combined_data_filt_final.int)[combined_data_filt_final.int$integrated_snn_res.0 == 0])
+cell_selection <- SetIdent(cell_selection, value = "old.ident")
+
+```
+
+```{r}
+DGE__bulk_cell_selection <- FindAllMarkers(cell_selection, assay = "RNA")
+
+```
+
+```{r}
+write.table(DGE__bulk_cell_selection,"Diff_exp_gene_bulk_control_vs_depletion.tsv",sep = "\t")
+```
+
+
+
+```{r}
+top50 <- DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-50, p_val_adj)
+top50
+```
+
+
+```{r}
+pdf("DE_bulk.pdf")
+mypar(1, 2, mar = c(4, 6, 3, 1))
+for (i in unique(top50$cluster)) {
+    barplot(sort(setNames(top50$avg_logFC, top50$gene)[top50$cluster == i], F), horiz = T, las = 1, main = paste0(i, " vs. rest"), border = "white", yaxs = "i")
+    abline(v = c(0, 0.25), lty = c(1, 2))
+}
+dev.off()
+```
+
+```{r}
+#top50 <- DGE__bulk_cell_selection %>% group_by(cluster) %>% top_n(-50, p_val_adj)
+
+cell_selection <- ScaleData(cell_selection, features = as.character(unique(top50$gene)), assay = "RNA")
+DoHeatmap(cell_selection, features = as.character(unique(top50$gene)), assay = "RNA") + theme(text = element_text(size = 10))
+```
+## saving the object
+
+
+```{r}
+saveRDS(combined_data_filt_final.int,"combined_data_filt_final.int.rds")
+```
+
+
