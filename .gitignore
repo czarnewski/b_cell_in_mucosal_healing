@@ -6,6 +6,7 @@
 **/log
 
 # History files
+.DS_Store
 .DStore
 .Rhistory
 .Rapp.history
