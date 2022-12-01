@@ -1,0 +1,285 @@
+
+---
+title: "Complete analysis"
+output: html_document
+---
+
+# Loading libraries
+
+```{r}
+library(Seurat)
+library(uwot)
+library(Matrix)
+library(rafalib)
+library(dplyr)
+library(harmony)
+library(biomaRt)
+
+# remotes::install_github("renozao/xbioc")
+# remotes::install_github("meichendong/SCDC")
+# remotes::install_github("czarnewski/niceRplots")
+library(niceRplots)
+library(xbioc)
+library(SCDC)
+```
+
+
+# Loading Visium datasets
+
+```{r}
+# LOAD VISIUM DATASETS FROM Parigi et al 2022 (GSE169749)
+d14 <- readRDS("../data/Visium_DSS14.rds")
+d0 <- readRDS("../data/Visium_DSSd0.rds")
+
+# LOAD VISIUM DATASET FROM BCD vs CTRL (this manuscript, GSE190595)
+se <- readRDS("/Users/paulo.czarnewski/Google Drive/2021_04_29_B_cell/R_objects/se")
+```
+
+
+# Processing single cell reference dataset
+
+```{r}
+# LOAD DATASET
+ref <- readRDS("reference_scRNAseq_colon_BM.rds")
+
+# RENAME CELLTYPES ACCORDING TO DATASET
+ref$cell_name_divided <- ref$cell_name
+ref$cell_name <- gsub("D0_|D14_|BCD_|CTRL_","",ref$cell_name)
+
+# IDENTIFY GENES PRESENT IN ALL DATASETS (SC + ST)
+common_genes <- rownames(ref)
+common_genes <- common_genes[ 
+  (common_genes %in% rownames(d0)) & 
+  (common_genes %in% rownames(d14)) & 
+  (common_genes %in% rownames(se))  ]
+```
+
+# Identify marker genes for each cell cluster
+
+Differential gene expression was carried out using a subset of the cells to control for p-value inflation.
+
+```{r}
+# CALCULATE THE MAXIMUM NUMBER OF CELLS ALLOWED PER CLUSTER
+sample_size <- table(ref$cell_name)
+sample_size[ sample_size > 50 ] <- 50
+sample_size <- sample_size
+
+# RANDOMLY SELECT N CELLS FROM THE DATASET
+DGE_cells <- lapply(names(sample_size), function(x){ 
+  set.seed(1)
+  sample( colnames(ref) [ ref$cell_name == x ] , size = sample_size[x])})
+DGE_cells <- unlist(DGE_cells)
+
+# EXTRACT DATA FROM SELECTED CELLS TO A NEW OBJECT FOR D.G.E.
+DGE_DATA <- ref[common_genes , DGE_cells]
+DGE_DATA <- SetIdent(DGE_DATA,value = "cell_name")
+table(DGE_DATA$cell_name)
+
+# COMPUTE DIFFERENTIAL GENE EXPRESSION TEST ACROSS CLUSTERS
+detable <- FindAllMarkers( DGE_DATA, only.pos = F,max.cells.per.ident = 50,
+                          logfc.threshold = .1,assay = "RNA",
+                          min.pct = 0.05)
+
+# ADD DIFFERENTIAL ABUNDANCE STATISTICS TO RESULTS
+detable$pct.diff <- detable$pct.1 - detable$pct.2
+detable$log.pct.diff <- log2(detable$pct.1 / (detable$pct.2+0.01) )
+
+# FILTER RESULTS BASED ON SIGNIFICANCE AND FOLD-CHANGES 
+detable2 <- detable[ !grepl("Gm[0-9].*|Rik$",detable$gene) ,]
+detable2 <- detable2[detable2$p_val < 1e-3,]
+detable2 <- detable2[detable2$pct.diff > 0.1,]
+detable2 <- detable2[detable2$log.pct.diff > .5,]
+detable2 <- detable2[detable2$pct.1 > 0.2,]
+detable2 <- detable2[detable2$avg_logFC > 0.2,]
+
+# FORE EACH CLUSTER, SELECT THE TOP 30 BEST MARKERS
+library(dplyr)
+tops <- detable2 %>% group_by(cluster) %>% 
+  top_n(-60, p_val) %>% top_n(30, log.pct.diff)
+```
+
+# Plot marker genes for inspection
+
+```{r}
+# REORDER THE LIST OF MARKER GENES, SORTED BY HIGHEST EXPRESSION IN A CLUSTER
+ord <- sort(getcluster(DGE_DATA, unique(as.character(tops$gene)), "cell_name"))
+feats <- names(ord)
+
+# DOTPLOT
+mypar(1,1,mar=c(5,6,1,.5))
+niceRplots::plot_dots(DGE_DATA, genes = feats, 
+          clustering = "cell_name", 
+          main = "as dots",
+          srt = 30)
+```
+
+# Deconvolution using SCDC
+
+## Select genes for deconvolution of Visium spots
+
+```{r}
+# ONLY USE GENES FOUND IN ALL DATASETS
+common_genes <- unique(tops$gene)
+common_genes <- common_genes[ 
+  (common_genes %in% rownames(d0)) & 
+  (common_genes %in% rownames(d14)) &
+  (common_genes %in% rownames(se))  ]
+```
+
+## Run deconvolution 
+
+SCDC: Bulk Gene Expression Deconvolution by Multiple Single-Cell RNA Sequencing References
+
+Here, we used SCDC for deconvolution by first generating a single reference 
+basis matrix to be used for deconvolution of all datasets. This step is crucial 
+to allow comparisson of cell estimates across different deconvolution runs using
+the same reference. The standard SCDC function creates 1 basis matrix per dataset.
+
+```{r,fig.width=10,fig.height=10}
+# CREATE SCE OBJECT NECESSARY FOR SCDC PACKAGE
+sc_eset <- ExpressionSet(
+  assayData = as.matrix(DGE_DATA@assays$RNA@data[common_genes,]),
+  phenoData =  AnnotatedDataFrame(DGE_DATA@meta.data))
+
+# CREATE A JOINT BASIS MATRIX FOR DECONVOLUTION OF ALL DATASETS
+temp <- SCDC::SCDC_basis(x = sc_eset , ct.varname = "cell_name")
+
+# ENSURE ALL DATASETS ARE NORMALIZED IN THE SAME WAY
+normcounts_d0  <- NormalizeData(d0,assay = "Spatial")$Spatial@data[common_genes,]
+normcounts_d14 <- NormalizeData(d14,assay = "Spatial")$Spatial@data[common_genes,]
+normcounts_se  <- NormalizeData(se,assay = "RNA")$RNA@data[common_genes,]
+
+# RUN DECONVOLUTION ON ALL DATASETS USING THE SAME BASE MATRIX
+res_d0  <- SCDC::deconv_simple( normcounts_d0  , basis.norm = temp$basis )
+res_d14 <- SCDC::deconv_simple( normcounts_d14 , basis.norm = temp$basis )
+res_se  <- SCDC::deconv_simple( normcounts_se  , basis.norm = temp$basis )
+
+# SAVE OUTPUT
+saveRDS(res_d14 , "deconvolution_results_SCDC_d14.rds" )
+saveRDS(res_d0 , "deconvolution_results_SCDC_d0.rds" )
+saveRDS(res_se , "deconvolution_results_SCDC_CD19iDTR.rds" )
+
+# ASSIGN SCDC PROPORTIONS AS A NEW ASSAY IN THE RESPECTIVE SEURAT OBJECT
+d0@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(
+  data = t(res_d0$prop.est.mvw),min.cells = 0,min.features = 0)
+d14@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(
+  data = t(res_d14$prop.est.mvw),min.cells = 0,min.features = 0)
+se@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(
+  data = t(res_se$prop.est.mvw),min.cells = 0,min.features = 0)
+```
+
+## Save updated Seurat Objects so far
+
+```{r}
+# SAVE UPDATED SEURAT OBJECTS
+saveRDS(d0 , "Visium_DSSd0_SCDC.rds" )
+saveRDS(d14 , "Visium_DSSd14_SCDC.rds" )
+saveRDS(se , "Visium_CD19iDTR_SCDC.rds" )
+```
+
+
+# Split the CD19iDTR dataset into the BCD and CTRL samples
+
+```{r,fig.width=10,fig.height=10}
+# PROCESS THE CONTROL SAMPLE
+cd19_ctrl <- se[,se$sample_id == "CD19iDTR_day14_DSS_control" ]
+cd19_bcd <- se[,se$sample_id == "CD19iDTR_day14_DSS_Bcelldepl" ]
+
+# USE CONSISTEN CELL NAMES
+cd19_ctrl <- RenameCells(cd19_ctrl,new.names = sub("_.*","",colnames(cd19_ctrl)) )
+cd19_bcd <- RenameCells(cd19_bcd,new.names = sub("_.*","",colnames(cd19_bcd)) )
+
+# IMPORT HIRES IMAGES 
+image_ctrl <- Read10X_Image2(image.dir = "~/data/V19S23-095_C1/spatial")
+image_bcd <- Read10X_Image2(image.dir = "~/data/V19S23-095_D1/spatial")
+
+# ADD IMAGE TO CONTROL SAMPLE
+image_ctrl <- image_ctrl[Cells(x = cd19_ctrl)]
+DefaultAssay(object = image_ctrl) <- "RNA"
+cd19_ctrl[["slice1"]] <- image_ctrl
+
+# ADD IMAGE TO BCD SAMPLE
+image_bcd <- image_bcd[Cells(x = cd19_bcd)]
+DefaultAssay(object = image_bcd) <- "RNA"
+cd19_bcd[["slice1"]] <- image_bcd
+
+# SAVE RE-FORMATED OBJECTS
+saveRDS(cd19_ctrl,"Visium_CD19iDTR_ctrl.rds")
+saveRDS(cd19_bcd,"Visium_CD19iDTR_BCD.rds")
+```
+
+# Visually inspect CD19iDTR objects
+
+```{r}
+mypar(2,2)
+plot_spatial_feat(cd19_ctrl ,feat =  "nFeature_RNA",assay="RNA",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+plot_spatial_feat(cd19_bcd ,feat =  "nFeature_RNA",assay="RNA",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+```
+
+# Plot deconvolution results
+
+```{r,fig.width=10,fig.height=10}
+# CREATE OUTPUT DIRECTORY, IF NOT EXISTENT
+if(!dir.exists("SCDC_expression_cell_name")){
+  dir.create("SCDC_expression_cell_name",recursive = T)}
+
+
+# COMPUTE ONE-HOT CELL CLUSTER AND ADD TO THE METADATA (USED TO PLOT THE SC)
+temp <- model.matrix(~ 0 + tiss$cell_name)
+colnames(temp) <- paste0( "cluster_",levels(factor((tiss$cell_name)))) 
+rownames(temp) <- colnames(tiss)
+tiss@meta.data <- cbind( tiss@meta.data , temp)
+
+
+# ENSURING CELL NAMES ARE CONSISTENT (SEURAT SNEAKLY REPLACES SOME CHARACTERS ON LOAD)
+rownames(d0@assays$SCDC_prop@data) <- 
+  gsub("[-]","_",rownames(d0@assays$SCDC_prop@data)) 
+rownames(d14@assays$SCDC_prop@data) <- 
+  gsub("[-]","_",rownames(d14@assays$SCDC_prop@data)) 
+rownames(cd19_bcd@assays$SCDC_prop@data) <- 
+  gsub("[-]","_",rownames(cd19_bcd@assays$SCDC_prop@data)) 
+rownames(cd19_ctrl@assays$SCDC_prop@data) <- 
+  gsub("[-]","_",rownames(cd19_ctrl@assays$SCDC_prop@data)) 
+
+
+# PLOT THE SINGLE CELL CLUSTERS AND H&E FOR ALL SAMPLES
+pdf(paste0("SCDC_expression_cell_name/_deconvolution_SCDC_H&E.pdf"),
+      width = 2.75*5, height = 2.75*1, useDingbats = F)
+mypar(1,5,mar=c(1,1,2,1))
+plot_meta(tiss, red = "joint_umap",feat = "cell_name",cex=.8,label = T)
+for(i in c("d0","d14","cd19_ctrl","cd19_bcd")){
+  plot_spatial_feat(get(i), feat = "E_3", maxs = 1,  assay="SCDC_prop",
+     pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+}
+dev.off()
+
+
+# FOR EACH CELL TYPE DO:
+for(i in rownames(d0@assays$SCDC_prop@data)){
+  
+  # CREATE A PDF WITH LAYOUT
+  pdf(paste0("SCDC_expression_cell_name/",i,".pdf"),
+      width = 2.75*5, height = 2.75*1, useDingbats = F)
+  mypar(1,5,mar=c(1,1,2,1))
+  
+  # PLOT THE CURRENT SINGLE CELL CLUSTER
+  plot_feat( tiss , red = "joint_umap", feat = paste0("cluster_",i), cex=.8,cex.main=2)
+  
+  # DEFINE MAXIMUM VALUES FOR THE CURRENT CELLTYPE ACROSS ALL VISIUM SAMPLES
+  maxs<- c(d0@assays$SCDC_prop@data[i,],d14@assays$SCDC_prop@data[i,],
+           cd19_ctrl@assays$SCDC_prop@data[i,],cd19_bcd@assays$SCDC_prop@data[i,])
+  maxs <- quantile( c(maxs[maxs>0],1e-40) , 0.95 )
+  maxs <- maxs + maxs*.1
+  
+  # PLOT THE CURRENT CELL TYPE IN EACH SAMPLE
+  for(k in c("d0","d14","cd19_ctrl","cd19_bcd")){
+    plot_spatial_feat(x = get(k) ,feat =  i,assay="SCDC_prop",
+      pch=16,cex=.95,plot_tissue = F,maxs = maxs,
+      main=paste0("d0 (",k,")"),cex.main=2)
+  }
+}
+```
+
+

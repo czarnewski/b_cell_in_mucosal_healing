@@ -1,0 +1,1503 @@
+
+---
+title: "Complete analysis"
+output: html_document
+---
+
+
+```{r}
+library(Seurat)
+library(uwot)
+library(Matrix)
+library(rafalib)
+library(dplyr)
+# remotes::install_github("czarnewski/niceRplots")
+source("~/repos/niceRplots/R/helper_functions.R")
+source("~/repos/niceRplots/R/plotting_functions.R")
+source("~/repos/niceRplots/R/add_fig_label.R")
+
+library(niceRplots)
+library(harmony)
+library(biomaRt)
+# install.packages("WGCNA")
+# library(WGCNA)
+```
+
+
+```{r}
+d14 <- readRDS("/Users/paulo.czarnewski/Google Drive/data-for-Paulo/riccardo-spatial-transcriptomics/V19S23-097_B1/V19S23_097_B1.rds")
+d0 <- readRDS("/Users/paulo.czarnewski/Google Drive/data-for-Paulo/riccardo-spatial-transcriptomics/V19S23-097_A1/V19S23-097_A1.rds")
+se <- readRDS("/Users/paulo.czarnewski/Google Drive/2021_04_29_B_cell/R_objects/se")
+se$seurat_clusters
+
+```
+
+
+
+
+
+```{r}
+pt.cex <- .9
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Ms4a1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ms4a1",transparency = 90,cex=pt.cex)
+
+
+plot_spatial_feat(d0,feat = "Cd79b",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cd79b",transparency = 90,cex=pt.cex)
+
+plot_spatial_feat(d0,feat = "Mmp9",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Mmp9",transparency = 90,cex =pt.cex)
+
+# grep("C5",rownames(d0),value = T)
+```
+
+
+
+
+
+```{r}
+# download.file("https://stringdb-static.org/download/protein.links.full.v11.0/10090.protein.links.full.v11.0.txt.gz","10090.protein.links.full.v11.0.txt.gz")
+# system("gunzip 10090.protein.links.full.v11.0.txt.gz")
+# 
+# download.file("https://stringdb-static.org/download/protein.physical.links.full.v11.0/10090.protein.physical.links.full.v11.0.txt.gz","10090.protein.physical.links.full.v11.0.txt.gz")
+# system("gunzip 10090.protein.physical.links.full.v11.0.txt.gz")
+# 
+# 
+# download.file("https://stringdb-static.org/download/protein.info.v11.0/10090.protein.info.v11.0.txt.gz","10090.protein.info.v11.0.txt.gz")
+# system("gunzip 10090.protein.info.v11.0.txt.gz")
+# 
+# 
+# download.file("https://www.proteinatlas.org/download/subcellular_location.tsv.zip","subcellular_location.tsv.zip")
+# system("unzip subcellular_location.tsv.zip")
+# 
+# 
+# download.file("http://current.geneontology.org/ontology/subsets/goslim_mouse.json","goslim_mouse.json")
+# 
+# download.file("http://current.geneontology.org/annotations/mgi.gaf.gz")
+# system("gunzip 10090.protein.info.v11.0.txt.gz")
+```
+
+
+
+```{r}
+#Get protein information
+# pinfo <- readLines("10090.protein.info.v11.0.txt")
+# pinfo <- strsplit(pinfo,split = "\t")
+# pinfo <- lapply( pinfo , function(x){ x[1:2]} )
+# pinfo <- t(as.data.frame(pinfo))
+# rownames(pinfo) <- pinfo[,1]
+# colnames(pinfo) <- pinfo[1,]
+# pinfo <- as.data.frame(pinfo[-1,])
+# head(pinfo)
+# 
+# 
+# #Get protein interactions
+# links <- read.delim("10090.protein.links.full.v11.0.txt",sep = " ")
+# 
+# # links <- read.delim("10090.protein.physical.links.v11.0.txt",sep = " ")
+# links$protein_ligand <- pinfo[ match( links$protein1, pinfo[,1]) , 2]
+# links$protein_receptor <- pinfo[ match( links$protein2, pinfo[,1]) , 2]
+# head(links)
+# 
+# temp <- links[ links$database == "900" , ]
+# temp <- temp[ temp$textmining != "0" , ]
+# temp <- temp[ temp$textmining_transferred != "0" , ]
+# # temp <- links[links$protein_ligand == "Gnai3",]
+# temp <- temp[temp$experiments_transferred != "0",]
+# 
+# temp <- temp[order(temp$combined_score,decreasing = T),]
+# 
+# # temp[order(as.numeric(temp$combined_score),decreasing = T),]
+# # table(links$database)
+# 
+# 
+# #Get annotations
+# mart = useMart("ensembl", dataset = paste0("mmusculus","_gene_ensembl"),host="jul2019.archive.ensembl.org")
+# grep( "external" , biomaRt::listAttributes(mart)[,"name"],value = T )
+# annot <- getBM(c("external_gene_name","goslim_goa_accession","goslim_goa_description"),mart = mart)
+# head(annot,40)
+# 
+# 
+# #Get protein interactions
+# all_terms <- sort(table(annot$goslim_goa_description),T)
+# all_terms[grep("int",names(all_terms),value = T)]
+# 
+# out <- venn::venn(x = list(annot[annot$goslim_goa_description == "extracellular region",1],
+# annot[annot$goslim_goa_description == "intracellular",1],
+# annot[annot$goslim_goa_description == "extracellular matrix organization",1],
+# annot[annot$goslim_goa_description == "cell-cell signaling",1]
+# ),snames = c("er","intracellular","emo","ccs"),ilcs = 1,sncs = 2,ellipse = F,box = F)
+# 
+# #Filter genes that are exclusivelly intracellular
+# genes_use <- attr(out,"intersections")
+# genes_use <- genes_use[-grep("intracellular",names(genes_use))]
+# genes_use <- sort(unique(unlist(genes_use)))
+
+```
+
+
+
+
+
+```{r}
+download.file("https://static-content.springer.com/esm/art%3A10.1038%2Fncomms8866/MediaObjects/41467_2015_BFncomms8866_MOESM611_ESM.xlsx",destfile = "41467_2015_BFncomms8866_MOESM611_ESM.xlsx")
+ppi <- as.data.frame(readxl::read_excel("41467_2015_BFncomms8866_MOESM611_ESM.xlsx",sheet = 2))
+
+
+human = useMart("ensembl", dataset = "hsapiens_gene_ensembl",host="jul2019.archive.ensembl.org")
+mart = useMart("ensembl", dataset = paste0("mmusculus_gene_ensembl"),host="jul2019.archive.ensembl.org" )
+lig = getLDS(attributes = c("external_gene_name"), filters = "external_gene_name", values = ppi$Ligand.ApprovedSymbol , mart = mart, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=F,valuesL = "hgnc_symbol")
+rec = getLDS(attributes = c("external_gene_name"), filters = "external_gene_name", values = ppi$Receptor.ApprovedSymbol , mart = mart, attributesL = c("hgnc_symbol"), martL = human, uniqueRows=F,valuesL = "hgnc_symbol")
+
+
+ppi$lig <- lig[match(ppi$Ligand.ApprovedSymbol,lig[,2]),1]
+ppi$rec <- rec[match(ppi$Receptor.ApprovedSymbol,rec[,2]),1]
+
+ppi <- ppi[ (!is.na(ppi$lig)) & (!is.na(ppi$rec)),]
+```
+
+
+
+```{r}
+library(future)
+library(future.apply)
+
+temp <- d0@assays$SCT@data[rownames(d0@assays$SCT@data) %in% unique(c(ppi$lig,ppi$rec)),]
+temp2 <- temp>0
+cors <- cor(t(as.matrix(temp)))
+
+temp2[1:10,1:10]
+codetection <- temp2 %*% t(temp2)
+codetection2 <- codetection / rowSums(temp2)
+mypar()
+hist( as.numeric(codetection), breaks = 200,border = NA,col="grey")
+
+dim(ppi)
+
+ppi$d0_cor <- apply( ppi , 1 , cors=cors, function(x, cors) {
+  if( (x["lig"] %in% rownames(cors)) & (x["rec"] %in% rownames(cors)) ){
+    cors[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$d0_codet <- apply( ppi , 1 , codetection=codetection, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$d0_codet_per <- apply( ppi , 1 , codetection=codetection2, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$d0_pval <- apply( ppi , 1 , temp=temp, function(x, temp) {
+  if( (x["lig"] %in% rownames(temp)) & (x["rec"] %in% rownames(temp)) ){
+    return(cor.test(temp[x["lig"],],temp[x["rec"],])$p.value)
+  }else{
+      return(1)
+  }
+} )
+
+```
+
+
+
+
+
+```{r}
+temp <- d14@assays$SCT@data[rownames(d14@assays$SCT@data) %in% unique(c(ppi$lig,ppi$rec)),]
+temp2 <- temp>0
+cors <- cor(t(as.matrix(temp)))
+
+temp2[1:10,1:10]
+codetection <- temp2 %*% t(temp2)
+codetection2 <- codetection / rowSums(temp2)
+mypar()
+hist( as.numeric(codetection), breaks = 200,border = NA,col="grey")
+
+dim(ppi)
+
+ppi$d14_cor <- apply( ppi , 1 , cors=cors, function(x, cors) {
+  if( (x["lig"] %in% rownames(cors)) & (x["rec"] %in% rownames(cors)) ){
+    cors[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$d14_codet <- apply( ppi , 1 , codetection=codetection, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+
+ppi$d14_codet_per <- apply( ppi , 1 , codetection=codetection2, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$d14_pval <- apply( ppi , 1 , temp=temp, function(x, temp) {
+  if( (x["lig"] %in% rownames(temp)) & (x["rec"] %in% rownames(temp)) ){
+    return(cor.test(temp[x["lig"],],temp[x["rec"],])$p.value)
+  }else{
+      return(1)
+  }
+} )
+```
+
+
+
+
+
+
+
+
+```{r}
+# plot(ppi$d0_codet,ppi$d14_codet, cex=.1)
+# abline(-.1,1,xpd=F)
+# abline(.1,1,xpd=F)
+# abline(0,1,xpd=F)
+# text(ppi$d0_codet,ppi$d14_codet,labels = paste0(ppi$lig,"_",ppi$rec) )
+
+
+pdf("spatial_ligant-receptor_codetection_test.pdf",width = 8,height = 8,useDingbats = F)
+mypar()
+x <- log2( (ppi$d14_codet_per+1) / (ppi$d0_codet_per+1) )
+y <- log(-log(ppi$d14_pval)+1)
+plot( x, y, cex=.3+ppi$d14_cor*2,xlab="",ylab="correlation log1p(-log(p-value))",
+     xlim=c(-1,1),pch=16)
+abline( v=c(-.1,.1) , h=log(-log(0.05)+1), col="grey",xpd=F)
+sel <- abs(x) > .1
+text(x[sel], y[sel],labels = paste0(ppi$lig,"\n",ppi$rec)[sel],cex = .5 )
+dev.off()
+
+
+
+
+pdf("spatial_ligant-receptor_codetection_d0d14.pdf",width = 8*3,height = 8,useDingbats = F)
+mypar(1,3)
+x <- log2(ppi$d14_codet_per+1)
+y <- log2(ppi$d0_codet_per+1)
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-0.05,1.05),ylim=c(-.05,1.05))
+sel <- (abs(x - y) > .1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+
+x <- log2(ppi$d14_codet+1)
+y <- log2(ppi$d0_codet+1)
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-1,12),ylim=c(-1,12))
+sel <- (abs(x - y) > 1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+
+x <- ppi$d0_cor
+y <- ppi$d14_cor
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-.4,.4),ylim=c(-.4,.4))
+sel <- (abs(x - y) > .1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+dev.off()
+
+# 
+# x <- log2((ppi$d14_codet+1)/(ppi$d0_codet+1))
+# y <- ppi$d14_cor
+# plot( x, y, cex=.3+ppi$d14_cor*2,
+#      xlim=c(-1,1),pch=16)
+# abline( v=c(-.15,.15) , h=log(-log(0.05)+1), col="grey",xpd=F)
+# sel <- abs(x) > .15
+# text(x[sel], y[sel],labels = paste0(ppi$lig,"\n",ppi$rec)[sel],cex = .5 )
+# 
+
+
+
+
+abline(v=c(-.1,.1),xpd=F)
+
+
+plot(ppi$d0_cor,ppi$d14_cor, cex=.1)
+
+
+
+
+plot( log2((ppi$d14_cor+1)/(ppi$d0_cor+1)),
+      ppi$d14_cor, cex=.4,xlim=c(-.3,.3))
+
+
+
+plot( log(-log(ppi$d0_pval)+1) , log(-log(ppi$d14_pval)+1), cex=.1)
+sel <- log(-log(ppi$d0_pval)+1)
+text(log(-log(ppi$d0_pval)+1) [sel], 
+     log(-log(ppi$d14_pval)+1)[sel],
+     labels = paste0(ppi$lig,"\n",ppi$rec)[sel],cex = .5 )
+
+
+plot( log(-log(ppi$d0_cor)+1) , log(-log(ppi$d14_pval)+1), cex=.1)
+
+
+
+plot( log2((ppi$d14_cor+1)/(ppi$d0_cor+1)),
+      log(-log(ppi$d14_pval)+1),
+      cex=.2+log2((ppi$d14_codet+1)/(ppi$d0_codet+1)),
+      xlim=c(-.3,.3))
+sel <- .2+log2((ppi$d14_codet+1)/(ppi$d0_codet+1)) > 3
+text(log2((ppi$d14_cor+1)/(ppi$d0_cor+1))[sel], 
+     log(-log(ppi$d14_pval)+1)[sel],
+     labels = paste0(ppi$lig,"\n",ppi$rec)[sel],cex = .5 )
+
+
+# plot( ppi$d14_codet - ppi$d0_codet , 
+#       log(-log(ppi$d14_pval)+1) , cex= 2*ppi$d14_cor+.4,pch=16)
+# abline( v=c(-.3,.3) , h=log(-log(0.05)+1), col="grey",xpd=F)
+
+
+
+
+```
+
+
+
+
+```{r}
+pt.cex <- .9
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Wnt7b",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Fzd10",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Wnt7b",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Fzd10",transparency = 90,cex=pt.cex)
+
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Wnt7b",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Fzd1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Wnt7b",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Fzd1",transparency = 90,cex=pt.cex)
+
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Osm",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Il6st",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Osm",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Il6st",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Ptn",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Sdc3",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ptn",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Sdc3",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Col1a1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Cd44",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Col1a1",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Cd44",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Col1a2",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Cd44",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Col1a2",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Cd44",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Mmp9",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Mmp9",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Ephb2",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ephb2",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "App",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Cd74",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "App",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Cd74",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Calca",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Ramp2",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Calca",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Ramp2",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Tnf",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Tnfrsf21",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Tnf",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d14,feat = "Tnfrsf21",transparency = 90,cex=pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Ighd",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ighd",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Ighm",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ighm",transparency = 90,cex =pt.cex)
+
+plot_spatial_feat(d0,feat = "Ms4a1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ms4a1",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Cd79b",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cd79b",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Cd79a",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cd79a",transparency = 90,cex=pt.cex)
+
+
+plot_spatial_feat(d0,feat = "Cd3e",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cd3e",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Cd3d",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cd3d",transparency = 90,cex=pt.cex)
+
+
+
+
+plot_spatial_feat(d0,feat = "C1qb",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "C1qb",transparency = 90,cex=pt.cex)
+
+plot_spatial_feat(d0,feat = "Jchain",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Jchain",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Igha",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Igha",transparency = 90,cex=pt.cex)
+
+
+
+
+plot_spatial_feat(d0,feat = "Stat1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Stat1",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Ly6a",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ly6a",transparency = 90,cex=pt.cex)
+
+
+
+plot_spatial_feat(d0,feat = "Serpina3f",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Serpina3f",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Serpina3g",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Serpina3g",transparency = 90,cex=pt.cex)
+
+
+
+
+plot_spatial_feat(d0,feat = "Cpa3",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Cpa3",transparency = 90,cex=pt.cex)
+
+
+
+
+
+plot_spatial_feat(d0,feat = "Car8",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Car8",transparency = 90,cex=pt.cex)
+
+
+
+plot_spatial_feat(d0,feat = "Siglech",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Siglech",transparency = 90,cex=pt.cex)
+plot_spatial_feat(d0,feat = "Slamf9",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Slamf9",transparency = 90,cex=pt.cex)
+
+
+plot_spatial_feat(d0,feat = "Fcnb",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Fcnb",transparency = 90,cex=pt.cex)
+
+
+
+plot_spatial_feat(d0,feat = "Klrd1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Klrd1",transparency = 90,cex=pt.cex)
+
+
+
+mypar()
+plot_spatial_feat(d0,feat = "Serpina3f",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Serpina3f",transparency = 90,cex=pt.cex)
+
+plot_spatial_feat(d0,feat = "Serpina3g",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Serpina3g",transparency = 90,cex=pt.cex)
+
+
+plot_spatial_feat(d0,feat = "Zbp1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Zbp1",transparency = 90,cex=pt.cex)
+
+
+plot_spatial_feat(d0,feat = "Ifi47",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Ifi47",transparency = 90,cex=pt.cex)
+
+plot_spatial_feat(d0,feat = "Mmp9",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Mmp9",transparency = 90,cex =pt.cex)
+
+plot_spatial_feat(d0,feat = "Mmp7",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Mmp7",transparency = 90,cex =pt.cex)
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Wnt16",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Wnt16",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Fzd6",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Fzd6",transparency = 90,cex =pt.cex)
+
+
+
+
+mypar(2,2)
+plot_spatial_feat(d0,feat = "Calm1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Calm1",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d0,feat = "Egfr",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Egfr",transparency = 90,cex =pt.cex)
+
+
+d0$nFeature_SCT
+mypar(2,2)
+plot_spatial_feat(d0,feat = "nFeature_SCT",cex =pt.cex,plot_tissue = F)
+plot_spatial_feat(d14,feat = "nFeature_SCT",cex =pt.cex,plot_tissue = F)
+plot_spatial_feat(d0,feat = "Egfr",transparency = 90,cex =pt.cex)
+plot_spatial_feat(d14,feat = "Egfr",transparency = 90,cex =pt.cex)
+
+
+
+# grep("C5",rownames(d0),value = T)
+gc()
+```
+
+
+
+
+
+```{r}
+tiss <- readRDS("complete_dataset_BM_20210817.rds")
+
+
+table( gsub("D0_|D14_|BCD_|CTRL_","",tiss$cell_name) )
+
+tiss$cell_name_divided <- tiss$cell_name
+tiss$cell_name <- gsub("D0_|D14_|BCD_|CTRL_","",tiss$cell_name)
+
+common_genes <- rownames(tiss)
+common_genes <- common_genes[ (common_genes %in% rownames(d0)) & ( common_genes %in% rownames(d14)) & ( common_genes %in% rownames(se))  ]
+common_genes
+```
+
+
+```{r}
+sample_size <- table(tiss$cell_name)
+sample_size[ sample_size > 50 ] <- 50
+sample_size <- sample_size
+
+
+DGE_cells <- lapply(names(sample_size), function(x){ 
+  set.seed(1)
+  sample( colnames(tiss) [ tiss$cell_name == x ] , size = sample_size[x])
+  })
+DGE_cells <- unlist(DGE_cells)
+
+DGE_DATA <- tiss[common_genes , DGE_cells]
+DGE_DATA <- SetIdent(DGE_DATA,value = "cell_name")
+table(DGE_DATA$cell_name)
+
+detable <- FindAllMarkers( DGE_DATA, only.pos = F,max.cells.per.ident = 50,
+                          logfc.threshold = .1,assay = "RNA",
+                          min.pct = 0.05)
+# detable <- detable[ detable$p_val < 0.05,  ]
+detable$pct.diff <- detable$pct.1 - detable$pct.2
+detable$log.pct.diff <- log2(detable$pct.1 / (detable$pct.2+0.01) )
+
+detable[detable$gene=="Serpina3f",]
+
+
+
+# detable2 <- detable[ !grepl("Rp[ls]|Tms|Cdc|Hsp|B2m|Atp|Hist|Gm[0-9].*|Rik$",detable$gene) ,]
+detable2 <- detable[ !grepl("Gm[0-9].*|Rik$",detable$gene) ,]
+detable2 <- detable2[detable2$p_val < 1e-3,]
+detable2 <- detable2[detable2$pct.diff > 0.1,]
+detable2 <- detable2[detable2$log.pct.diff > .5,]
+detable2 <- detable2[detable2$pct.1 > 0.2,]
+detable2 <- detable2[detable2$avg_logFC > 0.2,]
+unique(detable2$gene)
+# detable2 <- detable2[order(detable2$log.pct.diff,decreasing = T),]
+
+
+detable2[detable2$gene=="Mmp9",]
+
+
+library(dplyr)
+detable2 %>% group_by(cluster) %>% top_n(-60, p_val) %>% top_n(30, log.pct.diff) -> tops
+unique(tops$gene)
+sort(unique(grep("Ser",detable2$gene,value=T)))
+sort(unique(grep("Serp",tops$gene,value=T)))
+sort(unique(grep("Mm",tops$gene,value=T)))
+
+
+```
+
+
+
+```{r}
+ord <- factor(sapply(unique(as.character(tops$gene)),function(x){getcluster(DGE_DATA, x, "cell_name")}))
+feats <- unique(as.character(tops$gene))[order(as.numeric( as.character(ord) ))]
+
+mypar(1,1,mar=c(5,6,1,.5))
+plot_dots(DGE_DATA, genes = feats, 
+          clustering = "cell_name", 
+          main = "as dots",
+          srt = 30)
+```
+
+
+
+```{r}
+# means <- sapply(sort(as.character(unique(tiss$seurat_clusters))),function(x){
+#   Matrix::rowMeans(tiss@assays$RNA@counts[,tiss$seurat_clusters==x ])
+# })
+# means <- log1p( means )
+# means <-  t( t( means) / colSums(means) ) * 1000
+# 
+# # means <-  means / ( rowSums(means) + 1 )
+# means <- round(means,4)
+# 
+# colnames(means) <- paste0("c",sort(as.character(unique(tiss$seurat_clusters))))
+# # means <- t( t(means) / colSums(means) )
+# means <- as.data.frame(means)
+# # means$bulk <- rowMeans(means)
+```
+
+
+
+#Select genes to be used in deconvolution
+
+```{r}
+# detable2 %>% group_by(cluster) %>% top_n(30, log.pct.diff) %>% top_n(10, avg_logFC) -> tops
+common_genes <- unique(tops$gene)
+# sort(common_genes)
+# 
+# # common_genes <- tiss@assays$RNA@var.features
+# # common_genes <- rownames(means)
+# 
+common_genes <- common_genes[ (common_genes %in% rownames(d0)) & ( common_genes %in% rownames(d14)) & ( common_genes %in% rownames(se))  ]
+common_genes
+```
+
+
+SCDC: Bulk Gene Expression Deconvolution by Multiple Single-Cell RNA Sequencing References
+
+```{r,fig.width=10,fig.height=10}
+# remotes::install_github("renozao/xbioc")
+# remotes::install_github("meichendong/SCDC")
+library(xbioc)
+library(SCDC)
+
+sc_eset <- ExpressionSet(assayData=as.matrix(DGE_DATA@assays$RNA@data[common_genes,]),
+                         phenoData =  AnnotatedDataFrame(DGE_DATA@meta.data))
+# st_eset_d0 <- ExpressionSet(assayData=as.matrix(d0@assays$Spatial@counts[common_genes,]),
+#                          phenoData = AnnotatedDataFrame(d0@meta.data))
+# st_eset_d14 <- ExpressionSet(assayData=as.matrix(d14@assays$Spatial@counts[common_genes,]),
+#                          phenoData = AnnotatedDataFrame(d14@meta.data))
+# st_eset_se <- ExpressionSet(assayData=as.matrix(se@assays$RNA@counts[common_genes,]),
+#                          phenoData = AnnotatedDataFrame(se@meta.data))
+
+
+temp <- SCDC::SCDC_basis(x = sc_eset , ct.varname = "cell_name")
+temp$basis[1:20,]
+
+temp2 <- NormalizeData(d0,assay = "Spatial")$Spatial@data[common_genes,]
+aaa <- SCDC::deconv_simple( temp2 , basis.norm = temp$basis )
+res_d0 <- aaa
+sum(aaa$prop.est.mvw[,"B_0"])
+sum(aaa$prop.est.mvw[,"B_6"])
+sum(aaa$prop.est.mvw[,"B_0"])
+
+temp2 <- NormalizeData(d14,assay = "Spatial")$Spatial@data[common_genes,]
+res_d14 <- SCDC::deconv_simple( temp2 , basis.norm = temp$basis )
+
+temp2 <- NormalizeData(se,assay = "RNA")$RNA@data[common_genes,]
+res_se <- SCDC::deconv_simple( temp2 , basis.norm = temp$basis )
+
+# 
+# 
+# res_d0 <- SCDC::SCDC_prop(bulk.eset = st_eset_d0,
+#                        sc.eset = sc_eset,
+#                        ct.varname = "cell_name",
+#                        ct.sub = as.character(unique(sc_eset$cell_name)) )
+d0@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(data = t(res_d0$prop.est.mvw),
+                                                      min.cells = 0,min.features = 0)
+saveRDS(res_d0 , "deconvolution_results_SCDC_d0.rds" )
+# 
+# 
+# res_d14 <- SCDC::SCDC_prop(bulk.eset = st_eset_d14,
+#                        sc.eset = sc_eset,
+#                        ct.varname = "cell_name",
+#                        ct.sub = as.character(unique(sc_eset$cell_name)) )
+saveRDS(res_d14 , "deconvolution_results_SCDC_d14.rds" )
+d14@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(data = t(res_d14$prop.est.mvw),
+                                                       min.cells = 0,min.features = 0)
+# 
+# 
+# res_se <- SCDC::SCDC_prop(bulk.eset = st_eset_se,
+#                        sc.eset = sc_eset,
+#                        ct.varname = "cell_name",
+#                        ct.sub = as.character(unique(sc_eset$cell_name)) )
+saveRDS(res_se , "deconvolution_results_SCDC_CD19iDTR.rds" )
+se@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(data = t(res_se$prop.est.mvw),
+                                                       min.cells = 0,min.features = 0)
+```
+
+
+```{r,fig.width=10,fig.height=10}
+d0@assays[["SCDC_prop_norm"]] <- Seurat::CreateAssayObject(
+  data = round(t( t(d0@assays$SCDC_prop@data) * 20 * (d0$nFeature_Spatial/mean(d0$nFeature_Spatial)) ),3),
+  min.cells = 0,min.features = 0)
+
+d14@assays[["SCDC_prop_norm"]] <- Seurat::CreateAssayObject(
+  data = round(t( t(d14@assays$SCDC_prop@data) * 20 * (d14$nFeature_Spatial/mean(d14$nFeature_Spatial)) ),3),
+  min.cells = 0,min.features = 0)
+
+
+maxs <- max( c(d0@assays$SCDC_prop@data[i,],d0@assays$SCDC_prop@data[i,]) )
+i <- "51"
+plot_spatial_feat(d14 ,feat =  i,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = F,maxs = maxs,transparency = "99")
+
+
+plot_spatial_feat(d0 ,feat =  "nFeature_Spatial",assay="Spatial",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+plot_spatial_feat(d14 ,feat =  "nFeature_Spatial",assay="SCDC_prop",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+
+remotes::install_github("")
+library(STutility)
+ST.FeaturePlot(se, features = c("nFeature_RNA", "nCount_RNA", "percent.mito", "percent.ribo"), ncol = 2, grid.ncol = 1, cols = c("darkblue", "cyan", "yellow", "red", "darkred"), show.sb = F)
+
+
+Read10X_Image2 <- function (image.dir, filter.matrix = TRUE, ...) 
+{ image <- png::readPNG(source = file.path(image.dir, "tissue_hires_image.png"))
+    scale.factors <- jsonlite::fromJSON(txt = file.path(image.dir, "scalefactors_json.json"))
+    tissue.positions <- read.csv(file = file.path(image.dir, 
+        "tissue_positions_list.csv"), col.names = c("barcodes", 
+        "tissue", "row", "col", "imagerow", "imagecol"), header = FALSE, 
+        as.is = TRUE, row.names = 1)
+    if (filter.matrix) {
+        tissue.positions <- tissue.positions[which(x = tissue.positions$tissue == 
+            1), , drop = FALSE]
+    }
+    unnormalized.radius <- scale.factors$fiducial_diameter_fullres * 
+        scale.factors$tissue_lowres_scalef
+    spot.radius <- unnormalized.radius/max(dim(x = image))
+    return(new(Class = "VisiumV1", image = image, scale.factors = scalefactors(spot = scale.factors$tissue_hires_scalef, 
+        fiducial = scale.factors$fiducial_diameter_fullres, hires = scale.factors$tissue_hires_scalef, 
+        scale.factors$tissue_lowres_scalef), coordinates = tissue.positions, 
+        spot.radius = spot.radius)) }
+
+table(se$sample_id)
+
+cd19_ctrl <- se[,se$sample_id == "CD19iDTR_day14_DSS_control" ]
+cd19_ctrl <- RenameCells(cd19_ctrl,new.names = sub("_.*","",colnames(cd19_ctrl)) )
+image <- Read10X_Image2(image.dir = "~/Google Drive/2021_04_29_B_cell/v1.0.0/V19S23-095_C1/spatial")
+image <- image[Cells(x = cd19_ctrl)]
+DefaultAssay(object = image) <- "RNA"
+cd19_ctrl[["slice1"]] <- image
+saveRDS(cd19_ctrl,"cd19_ctrl.rds")
+
+cd19_bcd <- se[,se$sample_id == "CD19iDTR_day14_DSS_Bcelldepl" ]
+cd19_bcd <- RenameCells(cd19_bcd,new.names = sub("_.*","",colnames(cd19_bcd)) )
+image <- Read10X_Image2(image.dir = "~/Google Drive/2021_04_29_B_cell/v1.0.0/V19S23-095_D1/spatial")
+image <- image[Cells(x = cd19_bcd)]
+DefaultAssay(object = image) <- "RNA"
+cd19_bcd[["slice1"]] <- image
+saveRDS(cd19_bcd,"cd19_bcd.rds")
+
+mypar(2,2)
+plot_spatial_feat(cd19_ctrl ,feat =  "nFeature_RNA",assay="RNA",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+plot_spatial_feat(cd19_bcd ,feat =  "nFeature_RNA",assay="RNA",
+                  transparency = "90",pch=16,cex=.9,plot_tissue = F)
+
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+if(!dir.exists("SCDC_expression_cell_name")){dir.create("SCDC_expression_cell_name",recursive = T)}
+
+temp <- model.matrix(~0+tiss$cell_name)
+colnames(temp) <- paste0( "cluster_",levels(factor((tiss$cell_name)))) 
+rownames(temp) <- colnames(tiss)
+tiss@meta.data <- cbind( tiss@meta.data , temp)
+
+
+rownames(d0@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(d0@assays$SCDC_prop@data)) 
+rownames(d14@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(d14@assays$SCDC_prop@data)) 
+rownames(cd19_bcd@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(cd19_bcd@assays$SCDC_prop@data)) 
+rownames(cd19_ctrl@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(cd19_ctrl@assays$SCDC_prop@data)) 
+
+# png("SCDC_expression_cell_name/_deconvolution_SCDC_H&E.png",
+#     width = 1600*5,
+#     height = 1600*1,
+#     res = 300)
+pdf(paste0("SCDC_expression_cell_name/_deconvolution_SCDC_H&E.pdf"),
+      width = 2.75*5,
+    height = 2.75*1,
+    useDingbats = F)
+  mypar(1,5,mar=c(1,1,2,1))
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = T)
+  plot_spatial_feat(d0 ,feat =  "E_3",maxs = 1,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+  plot_spatial_feat(d14 ,feat =  "E_3",maxs = 1,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+  plot_spatial_feat(cd19_ctrl ,feat =  "E_3",maxs = 1,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+  plot_spatial_feat(cd19_bcd ,feat =  "E_3",maxs = 1,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+dev.off()
+
+
+maxs<- c(d0@assays$SCDC_prop@data[,],d14@assays$SCDC_prop@data[,], cd19_ctrl@assays$SCDC_prop@data[,] ,  cd19_bcd@assays$SCDC_prop@data[,])
+maxs <- quantile( c(maxs[maxs>0],1e-40) , 0.95 )
+  
+for(i in rownames(d0@assays$SCDC_prop@data)){
+  # png(paste0("SCDC_expression_cell_name/",i,".png"),
+  #     width = 800*5,
+  #   height = 800*1,
+  #   res = 300)
+  pdf(paste0("SCDC_expression_cell_name/",i,".pdf"),
+      width = 2.75*5,
+    height = 2.75*1,
+    useDingbats = F)
+  mypar(1,5,mar=c(1,1,2,1))
+  plot_feat( tiss , red = "joint_umap", feat = paste0("cluster_",i), cex=.8,cex.main=2)
+  
+    maxs<- c(d0@assays$SCDC_prop@data[i,],d14@assays$SCDC_prop@data[i,],
+           cd19_ctrl@assays$SCDC_prop@data[i,],cd19_bcd@assays$SCDC_prop@data[i,])
+    maxs <- quantile( c(maxs[maxs>0],1e-40) , 0.95 )
+    maxs <- maxs + maxs*.1
+  plot_spatial_feat(d0 ,feat =  i,assay="SCDC_prop",
+                    pch=16,cex=.95,plot_tissue = F,maxs = maxs,main=paste0("d0 (",i,")"),cex.main=2)
+  plot_spatial_feat(d14 ,feat =  i,assay="SCDC_prop",
+                    pch=16,cex=.8,plot_tissue = F,maxs = maxs,main=paste0("d14 (",i,")"),cex.main=2)
+  plot_spatial_feat(cd19_ctrl ,feat =  i,assay="SCDC_prop",
+                    pch=16,cex=.78,plot_tissue = F,maxs = maxs,main=paste0("CTRL (",i,")"),cex.main=2)
+  plot_spatial_feat(cd19_bcd ,feat =  i,assay="SCDC_prop",
+                    pch=16,cex=.85,plot_tissue = F,maxs = maxs,main=paste0("BDC (",i,")"),cex.main=2)
+    dev.off()
+}
+
+
+colorRampPalette(c("grey70","navy"))(3)
+
+
+# png("deconvolution_SCDC_all.png",width = 800*8,height = 800*50,res = 300)
+# mypar(50,8,mar=c(1,1,2,1))
+# plot_spatial_feat(d0 ,feat =  "1",assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+# plot_spatial_feat(d14 ,feat =  "1",assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,main = "H&E",transparency = "01")
+#   
+# for(i in rownames(d0@assays$SCDC_prop@data)){
+#   maxs<- c(d0@assays$SCDC_prop@data[i,],d14@assays$SCDC_prop@data[i,], cd19_ctrl@assays$SCDC_prop@data[i,] ,  cd19_bcd@assays$SCDC_prop@data[i,])
+#   maxs <- quantile( maxs[ maxs > 0 ] , 0.95 )
+#   plot_spatial_feat(d0 ,feat =  i,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,maxs = maxs,main=paste0("d0 (",i,")"),transparency = "99")
+#   plot_spatial_feat(d14 ,feat =  i,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,maxs = maxs,main=paste0("d14 (",i,")"),transparency = "99")
+#   plot_spatial_feat(cd19_ctrl ,feat =  i,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,maxs = maxs,main=paste0("cd19_d14_ctrl (",i,")"),transparency = "99")
+#   plot_spatial_feat(cd19_bcd ,feat =  i,assay="SCDC_prop",pch=16,cex=.8,plot_tissue = T,maxs = maxs,main=paste0("cd19_d14_bcd (",i,")"),transparency = "99")
+# }
+# dev.off()
+
+
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+maxs<- c(d0@assays$SCDC_prop@data[i,],d14@assays$SCDC_prop@data[i,], cd19_ctrl@assays$SCDC_prop@data[i,] ,  cd19_bcd@assays$SCDC_prop@data[i,])
+
+res_d0 <- cor(t(d0@assays$SCDC_prop@data))
+res_d0[is.na(res_d0)] <- 0
+
+res_d14 <- cor(t(d14@assays$SCDC_prop@data))
+res_d14[is.na(res_d14)] <- 0
+
+res_ctrl <- cor(t(cd19_ctrl@assays$SCDC_prop@data))
+res_ctrl[is.na(res_ctrl)] <- 0
+
+res_bcd <- cor(t(cd19_bcd@assays$SCDC_prop@data))
+res_bcd[is.na(res_bcd)] <- 0
+
+
+pdf("deconvolution_spatial_correlation.pdf",
+    width = 10,
+    height = 10,
+    useDingbats = F)
+pheatmap::pheatmap( res_d0 , color = colorRampPalette(c("navy","grey95","firebrick"))(99),
+                    border=F,
+                    breaks = seq(-1,1,length.out = 100),cluster_rows = F,
+                    cluster_cols = F ,main = "d0")
+pheatmap::pheatmap( res_d14 , color = colorRampPalette(c("navy","grey95","firebrick"))(99),
+                    border=F,
+                    breaks = seq(-1,1,length.out = 100),cluster_rows = F,
+                    cluster_cols = F ,main = "d14")
+pheatmap::pheatmap( res_ctrl , color = colorRampPalette(c("navy","grey95","firebrick"))(99),
+                    border=F,
+                    breaks = seq(-1,1,length.out = 100),cluster_rows = F,
+                    cluster_cols = F  ,main = "ctrl")
+pheatmap::pheatmap( res_bcd , color = colorRampPalette(c("navy","grey95","firebrick"))(99),
+                    border=F,
+                    breaks = seq(-1,1,length.out = 100),
+                    cluster_rows = F,
+                    cluster_cols = F ,main = "bcd")
+dev.off()
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = T)
+red <- tiss@reductions$joint_umap@cell.embeddings
+feat <- factor(tiss$cell_name)
+centroids <-  sapply( as.character(levels(feat)) , 
+                          reds=as.data.frame(red[,1:2]), 
+                          cl1=feat, function(jj,reds,cl1) { pmean(reds[cl1==jj,])  })
+
+pdf("deconvolution_spatial_correlation_joint_umap.pdf",
+    width = 6,
+    height = 6,
+    useDingbats = F)
+mypar(2,2,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  temp <-  get(i)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .2,]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*3, 
+           col = colorRampPalette(c("navy","grey90","firebrick"))(99)[ (emb$w+1)*49+1 ] )
+}
+dev.off()
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_correlation_change_joint_umap.pdf",
+    width = 12,
+    height = 6,
+    useDingbats = F)
+mypar(2,4,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  temp <- (get(i)) - (res_d0)
+  temp[temp < -2] <- -2
+  temp[temp > 2] <- 2
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .1,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*1, 
+           col = colorRampPalette(c("navy","grey85","firebrick"))(99)[ (emb$w/2+1)*49+1 ] )
+}
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  temp <- (get(i)) - (res_ctrl)
+  temp[temp < -2] <- -2
+  temp[temp > 2] <- 2
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .1,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*1, 
+           col = colorRampPalette(c("navy","grey85","firebrick"))(99)[ (emb$w/2+1)*49+1 ] )
+}
+dev.off()
+```
+
+
+```{r,fig.width=10,fig.height=10}
+res_d0 <- d0@assays$SCDC_prop@data %*% t(d0@assays$SCDC_prop@data)
+res_d14 <- d14@assays$SCDC_prop@data %*% t(d14@assays$SCDC_prop@data)
+res_ctrl <- cd19_ctrl@assays$SCDC_prop@data %*% t(cd19_ctrl@assays$SCDC_prop@data)
+res_bcd <- cd19_bcd@assays$SCDC_prop@data %*% t(cd19_bcd@assays$SCDC_prop@data)
+```
+
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_codetection_quantification_joint_umap.pdf",
+    width = 8,
+    height = 8,
+    useDingbats = F)
+mypar(2,2,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  temp <-  log2(get(i)+1)
+  temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .1,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*3, 
+           col = colorRampPalette(c("grey80","black"))(99)[ (emb$w)*98+1 ] )
+}
+dev.off()
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_codetection_rate_joint_umap.pdf",
+    width = 16,
+    height = 8,
+    useDingbats = F)
+mypar(2,4,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  # temp <-  log2( (log2(get(i)+1)+1) / (log2(res_d0+1)+1) )
+  temp <-  log2( (sqrt(get(i))+1) / (sqrt(res_d0)+1) )
+  range(temp)
+  temp[temp < -2] <- -2
+  temp[temp > 2] <- 2
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .4,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*1, 
+           col = colorRampPalette(c("navy","grey85","firebrick"))(99)[ (emb$w/2+1)*49+1 ] )
+}
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  # temp <-  log2( (log2(get(i)+1)+1) / (log2(res_ctrl+1)+1) )
+  temp <-  log2( (sqrt(get(i))+1) / (sqrt(res_ctrl)+1) )
+  range(temp)
+  temp[temp < -2] <- -2
+  temp[temp > 2] <- 2
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .4,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*1, 
+           col = colorRampPalette(c("navy","grey85","firebrick"))(99)[ (emb$w/2+1)*49+1 ] )
+}
+dev.off()
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+d14 <- readRDS("/Users/paulo.czarnewski/Google Drive/data-for-Paulo/riccardo-spatial-transcriptomics/V19S23-097_B1/V19S23_097_B1.rds")
+d0 <- readRDS("/Users/paulo.czarnewski/Google Drive/data-for-Paulo/riccardo-spatial-transcriptomics/V19S23-097_A1/V19S23-097_A1.rds")
+
+res_d0 <- readRDS("deconvolution_results_SCDC_d0.rds" )
+d0@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(data = t(res_d0$prop.est.mvw),
+                                                      min.cells = 0,min.features = 0)
+
+res_d14 <- readRDS( "deconvolution_results_SCDC_d14.rds" )
+d14@assays[["SCDC_prop"]] <- Seurat::CreateAssayObject(data = t(res_d14$prop.est.mvw),
+                                                       min.cells = 0,min.features = 0)
+
+cd19_ctrl <- readRDS("cd19_ctrl.rds")
+cd19_bcd <- readRDS("cd19_bcd.rds" )
+
+
+rownames(d0@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(d0@assays$SCDC_prop@data)) 
+rownames(d14@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(d14@assays$SCDC_prop@data)) 
+rownames(cd19_bcd@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(cd19_bcd@assays$SCDC_prop@data)) 
+rownames(cd19_ctrl@assays$SCDC_prop@data) <- gsub("[-]","_",rownames(cd19_ctrl@assays$SCDC_prop@data)) 
+
+
+temp <- cbind( d0@assays$SCDC_prop@data , 
+               d14@assays$SCDC_prop@data ,
+               cd19_ctrl@assays$SCDC_prop@data ,
+               cd19_bcd@assays$SCDC_prop@data)
+
+temp2 <- c( rep("d0",ncol(d0)) , 
+                rep("d14",ncol(d14)) ,
+                rep("cd19_ctrl",ncol(cd19_ctrl)) ,
+                rep("cd19_bcd",ncol(cd19_bcd)))
+
+
+
+pdf("deconvolution_quantification.pdf",width = 7,height = 10 ,useDingbats = F)
+mypar(1,2,mar=c(5,3,2,4))
+barlist( temp , genes = rownames(temp), clustering = temp2, srt=45 )
+plot_dots( temp , genes = rownames(temp), clustering = temp2, srt=45 )
+dev.off()
+```
+
+
+
+
+```{r}
+library(future)
+library(future.apply)
+
+temp <- cd19_ctrl@assays$SCT@data[rownames(cd19_ctrl@assays$SCT@data) %in% unique(c(ppi$lig,ppi$rec)),]
+temp2 <- temp>0
+cors <- cor(t(as.matrix(temp)))
+
+temp2[1:10,1:10]
+codetection <- temp2 %*% t(temp2)
+codetection2 <- codetection / rowSums(temp2)
+mypar()
+hist( as.numeric(codetection), breaks = 200,border = NA,col="grey")
+
+dim(ppi)
+
+ppi$ctrl_cor <- apply( ppi , 1 , cors=cors, function(x, cors) {
+  if( (x["lig"] %in% rownames(cors)) & (x["rec"] %in% rownames(cors)) ){
+    cors[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$ctrl_codet <- apply( ppi , 1 , codetection=codetection, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$ctrl_codet_per <- apply( ppi , 1 , codetection=codetection2, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$ctrl_pval <- apply( ppi , 1 , temp=temp, function(x, temp) {
+  if( (x["lig"] %in% rownames(temp)) & (x["rec"] %in% rownames(temp)) ){
+    return(cor.test(temp[x["lig"],],temp[x["rec"],])$p.value)
+  }else{
+      return(1)
+  }
+} )
+
+```
+
+
+
+
+
+```{r}
+temp <- cd19_bcd@assays$SCT@data[rownames(cd19_bcd@assays$SCT@data) %in% unique(c(ppi$lig,ppi$rec)),]
+temp2 <- temp>0
+cors <- cor(t(as.matrix(temp)))
+
+temp2[1:10,1:10]
+codetection <- temp2 %*% t(temp2)
+codetection2 <- codetection / rowSums(temp2)
+mypar()
+hist( as.numeric(codetection), breaks = 200,border = NA,col="grey")
+
+dim(ppi)
+
+ppi$bcd_cor <- apply( ppi , 1 , cors=cors, function(x, cors) {
+  if( (x["lig"] %in% rownames(cors)) & (x["rec"] %in% rownames(cors)) ){
+    cors[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$bcd_codet <- apply( ppi , 1 , codetection=codetection, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+
+ppi$bcd_codet_per <- apply( ppi , 1 , codetection=codetection2, function(x, codetection) {
+  if( (x["lig"] %in% rownames(codetection)) & (x["rec"] %in% rownames(codetection)) ){
+    codetection[x["lig"],][x["rec"]] 
+  }else{
+      return(0)
+  }
+} )
+
+ppi$bcd_pval <- apply( ppi , 1 , temp=temp, function(x, temp) {
+  if( (x["lig"] %in% rownames(temp)) & (x["rec"] %in% rownames(temp)) ){
+    return(cor.test(temp[x["lig"],],temp[x["rec"],])$p.value)
+  }else{
+      return(1)
+  }
+} )
+
+
+```
+
+
+
+```{r}
+pdf("spatial_ligant-receptor_codetection_bcd.pdf",width = 8*3,height = 8,useDingbats = F)
+mypar(1,3)
+x <- log2(ppi$bcd_codet_per+1)
+y <- log2(ppi$ctrl_codet_per+1)
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-0.05,1.05),ylim=c(-.05,1.05))
+sel <- (abs(x - y) > .1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+
+x <- log2(ppi$bcd_codet+1)
+y <- log2(ppi$ctrl_codet+1)
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-1,12),ylim=c(-1,12))
+sel <- (abs(x - y) > 1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+
+x <- ppi$ctrl_cor
+y <- ppi$bcd_cor
+plot( x, y, xlab="",ylab="",pch=16,cex=.5,col="grey",xlim = c(-.4,.4),ylim=c(-.4,.4))
+sel <- (abs(x - y) > .1)
+points( x[sel], y[sel], xlab="",ylab="",pch=16,cex=.5,col="red")
+text(x[sel], y[sel],labels = paste0(ppi$lig)[sel],cex = .5 ,adj = c(.5,1))
+text(x[sel], y[sel],labels = paste0(ppi$rec)[sel],cex = .5 ,adj = c(.5,2))
+dev.off()
+```
+
+
+
+```{r}
+pt.cex <- .8
+mypar(2,5)
+lll <- "Il1rn"
+rrr <- "Il1r2"
+plot_spatial_feat(d0,feat = lll,transparency = 90,plot_tissue = F,cex =pt.cex)
+plot_spatial_feat(d14,feat = lll,transparency = 90,plot_tissue = F,cex=pt.cex)
+plot_spatial_feat(cd19_ctrl,feat = lll,transparency = 90,plot_tissue = F,cex =pt.cex,assay="RNA")
+plot_spatial_feat(cd19_bcd,feat = lll,transparency = 90,plot_tissue = F,cex=pt.cex,assay="RNA")
+plot_feat(tiss,red = "joint_umap",feat = lll,cex=.8)
+plot_spatial_feat(d0,feat = rrr,transparency = 90,plot_tissue = F,cex =pt.cex)
+plot_spatial_feat(d14,feat = rrr,transparency = 90,plot_tissue = F,cex=pt.cex)
+plot_spatial_feat(cd19_ctrl,feat = rrr,transparency = 90,plot_tissue = F,cex =pt.cex,assay="RNA")
+plot_spatial_feat(cd19_bcd,feat = rrr,transparency = 90,plot_tissue = F,cex=pt.cex,assay="RNA")
+plot_feat(tiss,red = "joint_umap",feat = rrr,cex=.8)
+```
+
+
+
+```{r}
+pdf(paste0("spatial_significant_ligand_receptor_pairs_codetection.pdf"),
+      width = 2.75*5,
+    height = 2.75*2,
+    useDingbats = F)
+  mypar(2,5,mar=c(1,1,2,1))
+# mypar(2,5)
+lll <- c("Wnt7b","Il21r","Il2","Osm","Ltf","Ltf","Ccl28","Tnfsf13b","Cxcl13","Cxcl13","C3","Btla","Il1b","Il1b","Il1b","Hdc","Il11","Il1rn")
+rrr <- c("Fzd1","Il22ra2","Il2rg","Il6st","Lrp1","Tfrc","Ccr10","Tnfrsf17","Cxcr3","Cxcr5","Cd19","Cd79a","Il1r1","Il1r2","Adrb2","Hrh2","Il6st","Il1r2")
+
+for(i in 1:length(lll) ){
+  plot_spatial_feat(d0,feat = lll[i],transparency = 90,plot_tissue = F,cex =.95)
+  plot_spatial_feat(d14,feat = lll[i],transparency = 90,plot_tissue = F,cex=.8)
+  plot_spatial_feat(cd19_ctrl,feat = lll[i],transparency = 90,plot_tissue = F,cex =.78,assay="RNA")
+  plot_spatial_feat(cd19_bcd,feat = lll[i],transparency = 90,plot_tissue = F,cex=.85,assay="RNA")
+  plot_feat(tiss,red = "joint_umap",feat = lll[i],cex=.8)
+  
+  plot_spatial_feat(d0,feat = rrr[i],transparency = 90,plot_tissue = F,cex =.95)
+  plot_spatial_feat(d14,feat = rrr[i],transparency = 90,plot_tissue = F,cex=.8)
+  plot_spatial_feat(cd19_ctrl,feat = rrr[i],transparency = 90,plot_tissue = F,cex =.78,assay="RNA")
+  plot_spatial_feat(cd19_bcd,feat = rrr[i],transparency = 90,plot_tissue = F,cex=.85,assay="RNA")
+  plot_feat(tiss,red = "joint_umap",feat = rrr[i],cex=.8)
+}
+dev.off()
+
+
+```
+
+
+
+
+
+
+
+
+
+```{r,fig.width=10,fig.height=10}
+res_d0 <- sqrt(d0@assays$SCDC_prop@data %*% t(d0@assays$SCDC_prop@data) / ncol(d0))
+res_d14 <- sqrt(d14@assays$SCDC_prop@data %*% t(d14@assays$SCDC_prop@data) / ncol(d14))
+res_ctrl <- sqrt(cd19_ctrl@assays$SCDC_prop@data %*% t(cd19_ctrl@assays$SCDC_prop@data) / ncol(cd19_ctrl))
+res_bcd <- sqrt(cd19_bcd@assays$SCDC_prop@data %*% t(cd19_bcd@assays$SCDC_prop@data) / ncol(cd19_bcd))
+```
+
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_codetection_quantification_joint_umap.pdf",
+    width = 8,
+    height = 8,
+    useDingbats = F)
+mypar(2,2,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  temp <-  (get(i))
+  print(range(temp))
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .005,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*20+1, 
+           col = colorRampPalette(c("grey80","black"))(99)[ (emb$w*10)*98+1 ] )
+}
+dev.off()
+```
+
+
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_codetection_rate_joint_umap.pdf",
+    width = 16,
+    height = 8,
+    useDingbats = F)
+  lims <- .1
+  
+mypar(2,4,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  # temp <-  log2( (log2(get(i)+1)+1) / (log2(res_d0+1)+1) )
+  aa <- get(i)
+  bb <- res_d0
+  
+  aa[aa < 0.005] <- 0
+  bb[bb < 0.005] <- 0
+  
+  temp <-  log2( ((aa)+1) / ((bb)+1) )*1
+  diag(temp) <- 0
+  print(range(temp))
+
+  temp[temp < -lims] <- -lims
+  temp[temp > lims] <- lims
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > 0.01,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*20+1, 
+           col = colorRampPalette(c("navy","grey85","red"))(99)[ (emb$w/lims+1)*49+1 ] )
+}
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+            main=i)
+  # temp <-  log2( (log2(get(i)+1)+1) / (log2(res_ctrl+1)+1) )
+  aa <- get(i)
+  bb <- res_ctrl
+  
+  aa[aa < 0.005] <- 0
+  bb[bb < 0.005] <- 0
+  
+  temp <-  log2( ((aa)+1) / ((bb)+1) )*1
+  # temp <-  log2( ((get(i))+1) / ((res_ctrl)+1) )*1
+  diag(temp) <- 0
+  print(range(temp))
+  temp[temp < -lims] <- -lims
+  temp[temp > lims] <- lims
+  # temp <- temp / max(temp)
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)),
+                    w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  emb <- emb[abs(emb$w) > .01,]
+  emb <- emb[order(abs(emb$w)),]
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*20+1, 
+           col = colorRampPalette(c("navy","grey85","red"))(99)[ (emb$w/lims+1)*49+1 ] )
+}
+dev.off()
+```
+
+
+
+
+```{r,fig.width=10,fig.height=10}
+
+
+
+```
+
+
+
+
+

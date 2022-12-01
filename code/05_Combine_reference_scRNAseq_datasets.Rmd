@@ -19,28 +19,6 @@ library(biomaRt)
 ```
 
 
-# B cell scRNAseq (DSSd0 vs DSSd4)
-
-```{r}
-
-```
-
-
-# Epithelial scRNAseq (DSSd14 | ctrl vs BCD)
-
-```{r}
-
-```
-
-
-# Stromal scRNAseq (DSSd14 | ctrl vs BCD)
-
-```{r}
-
-```
-
-
-
 # Bone marrow from Tabula Muris (GSE109774, healthy)
 
 ## Downloading datasets from GEO
@@ -61,7 +39,7 @@ download.file(
   destfile = paste0("../data/tabula_muris_GSE109774/GSM3040901.tar.gz"))
 
 
-# DECOMPRESS FILES 
+# DECOMPRESS FILES
 untar(tarfile = "../data/tabula_muris_GSE109774/GSM3040900.tar.gz",
       exdir = "../data/tabula_muris_GSE109774/")
 untar(tarfile = "../data/tabula_muris_GSE109774/GSM3040901.tar.gz",
@@ -79,7 +57,7 @@ file.remove(c("../data/tabula_muris_GSE109774/GSM3040900.tar.gz",
 ```{r}
 # CREATE SEURAT OBJECT FOR EACH DATASET
 dir_list <- list.dirs( PATH , full.names = F)[-1]
-rawdata <- lapply( dir_list , function(x) { 
+rawdata <- lapply( dir_list , function(x) {
   CreateSeuratObject(counts = Read10X(paste0(PATH,x)) , project = x) } )
 names(rawdata) <- dir_list
 
@@ -97,7 +75,7 @@ rawdata[["bone_marrow"]] <- NormalizeData( rawdata[["bone_marrow"]] )
 rawdata[["bone_marrow"]] <- FindVariableFeatures( rawdata[["bone_marrow"]],nfeatures = 4000 )
 rawdata[["bone_marrow"]] <- ScaleData( rawdata[["bone_marrow"]] ,vars.to.regress = "nFeature_RNA")
 rawdata[["bone_marrow"]] <- RunPCA( rawdata[["bone_marrow"]] ,npcs = 100 )
-rawdata[["bone_marrow"]] <- RunUMAP( 
+rawdata[["bone_marrow"]] <- RunUMAP(
   object = rawdata[["bone_marrow"]] ,dims = 1:50, reduction = "pca",
   spread = .5,min.dist = 0.3, repulsion.strength = 0.4 )
 rawdata[["bone_marrow"]] <- FindNeighbors( rawdata[["bone_marrow"]], dims = 1:30, reduction = "pca" )
@@ -206,11 +184,6 @@ plot_meta(data,"joint_umap","cell_name",cex=.5)
 
 
 # SAVE OBJECTS AND NORMALIZED MATRICES
-saveRDS(data,"complete_dataset_BM_20210817.rds")
-save_matrix_to_HDF5( data@assays$RNA@data , "complete_dataset_normdata_20210817.rds" )
+saveRDS(data,"reference_scRNAseq_colon_BM.rds")
+save_matrix_to_HDF5( data@assays$RNA@data , "colonic_reference_scRNAseq_normcounts.h5" )
 ```
-
-
-
-
-

@@ -1,0 +1,147 @@
+
+---
+title: "Complete analysis"
+output: html_document
+---
+
+# Loading libraries
+
+```{r}
+library(Seurat)
+library(uwot)
+library(Matrix)
+library(rafalib)
+library(dplyr)
+library(harmony)
+library(biomaRt)
+
+# remotes::install_github("czarnewski/niceRplots")
+library(niceRplots)
+source("./utils.R")
+```
+
+
+# Loading Visium datasets
+
+```{r}
+# READ IN DATA
+d0  <- readRDS( "Visium_DSSd0_SCDC.rds" )
+d14 <- readRDS( "Visium_DSSd14_SCDC.rds" )
+cd19_ctrl <- readRDS( "Visium_CD19iDTR_ctrl.rds" )
+cd19_bcd  <- readRDS( "Visium_CD19iDTR_BCD.rds" )
+```
+
+# Compute cell-cell co-detection in each dataset
+
+```{r,fig.width=10,fig.height=10}
+# FOR EACH DATASET
+for(k in c("d0","d14","cd19_ctrl","cd19_bcd")){
+  # COMPUTE CO-DETECTION SCORES
+  tmp <- sqrt( slot(get(i),"assays")$SCDC_prop@data %*% 
+            t( slot(get(i),"assays")$SCDC_prop@data ) / ncol(get(i)))
+  # ASSIGN TO VARIABLE
+  assign( x = paste0("res_",k) , value = tmp)
+}
+```
+
+# Compute cluster centroids
+
+```{r}
+red <- tiss@reductions$joint_umap@cell.embeddings
+feat <- factor(tiss$cell_name)
+centroids <-  sapply( as.character(levels(feat)) , 
+                          reds=as.data.frame(red[,1:2]), 
+                          cl1=feat, function(jj,reds,cl1) { pmean(reds[cl1==jj,])  })
+```
+
+# Visualise co-detection onto the single cell UMAP embeddings
+
+```{r,fig.width=10,fig.height=10}
+pdf("deconvolution_spatial_codetection_quantification_joint_umap.pdf",
+    width = 8, height = 8,  useDingbats = F)
+mypar(2,2,mar=c(1.1,1.1,2,0))
+for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+  
+  # PLOT THE SINGLE CELL UMAP ON THE BACKGROUND
+  plot_meta(tiss,red = "joint_umap",feat = "cell_name",
+    cex=.8,label = F,col = "grey90", main=i)
+  temp <-  (get(i))
+  
+  # ASSIGN CLUSTER CENTROIDS CO-DETECTION GRAPH
+  points(t(centroids),pch=21,bg="white",cex=1)
+  emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                    y=rep(colnames(temp),nrow(temp)), w=c(temp))
+  emb$x0 <- centroids[1,emb$x]
+  emb$y0 <- centroids[2,emb$x]
+  emb$x1 <- centroids[1,emb$y]
+  emb$y1 <- centroids[2,emb$y]
+  
+  # FILTER NON-SIGNIFICANT CO-DETECTION SCORES
+  emb <- emb[abs(emb$w) > .005,]
+  emb <- emb[order(abs(emb$w)),]
+  
+  # DRAW CO-DETECTION SCORES ONTO SINGLE CELL CLUSTER CENTROIDS
+  segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+           lwd = abs(emb$w)*20+1, 
+           col = colorRampPalette(c("grey80","black"))(99)[ (emb$w*10)*98+1 ] )
+}
+dev.off()
+```
+
+# Compute and plot differential cell-cell co-occurence 
+
+```{r,fig.width=10,fig.height=10}
+# CREATE PDF FILE AND PLOT LAYOUT
+pdf("deconvolution_spatial_codetection_rate_joint_umap.pdf",
+    width = 16, height = 8, useDingbats = F)
+mypar(2,4,mar=c(1.1,1.1,2,0))
+
+# DEFINE LIMITS (TO PROTECT FROM OUTLIERS)
+lims <- .1
+  
+# FOR EACH VISIUM DATASET TO BE USED AS CONTROL IN THE COMPARISSON, DO:
+for(J in c("res_d0","res_ctrl")){
+  
+  # FOR EACH DATASET, DO:
+  for(i in c("res_d0","res_d14","res_ctrl","res_bcd")){
+    
+    # PLOT THE SINGLE CELL UMAP ON THE BACKGROUND 
+    plot_meta(tiss, red = "joint_umap",feat = "cell_name",cex=.8,label = F,col = "grey90",
+              main=i)
+    
+    # ASSIGN CODETECTION RATES AND DEFINE REFERENCE (DSSd0)
+    aa <- get(i) ; aa[aa < 0.005] <- 0
+    bb <- res_d0 ; bb[bb < 0.005] <- 0
+    
+    # COMPUTE DIFFERENTIAL CO-DETECTION
+    temp <-  log2( ((aa)+1) / ((bb)+1) )*1
+    diag(temp) <- 0
+    
+    # CROP VALUES OUTSIDE LIMITS TO THE LIMIT VALUE 
+    temp[temp < -lims] <- -lims
+    temp[temp > lims] <- lims
+    
+    # ASSIGN CLUSTER CENTROIDS CO-DETECTION GRAPH
+    points(t(centroids),pch=21,bg="white",cex=1)
+    emb <- data.frame(x=c(sapply(rownames(temp),function(x){rep(x,ncol(temp))})),
+                      y=rep(colnames(temp),nrow(temp)),
+                      w=c(temp))
+    emb$x0 <- centroids[1,emb$x]
+    emb$y0 <- centroids[2,emb$x]
+    emb$x1 <- centroids[1,emb$y]
+    emb$y1 <- centroids[2,emb$y]
+    
+    # FILTER NON-SIGNIFICANT DIFFERENTIAL CO-DETECTION SCORES
+    emb <- emb[abs(emb$w) > 0.01,]
+    emb <- emb[order(abs(emb$w)),]
+    
+    # DRAW CO-DETECTION DIFFERENTIAL SCORES ONTO SINGLE CELL CLUSTER CENTROIDS
+    segments(x0 = emb$x0,y0 = emb$y0,x1 = emb$x1,y1 = emb$y1,
+             lwd = abs(emb$w)*20+1, 
+             col = colorRampPalette(c("navy","grey85","red"))(99)[ (emb$w/lims+1)*49+1 ] )
+  }
+}
+dev.off()
+```
+
+
